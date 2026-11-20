@@ -1,5 +1,6 @@
 package com.termux.app.agents.runtime
 
+import android.os.Build
 import com.termux.app.agents.models.CommandResult
 import com.termux.shared.logger.Logger
 import com.termux.shared.termux.TermuxConstants
@@ -76,8 +77,12 @@ class CommandRunner(
             }
             
             if (result == null) {
-                // Timeout - kill process
-                process.destroyForcibly()
+                // Timeout - kill process (destroyForcibly needs API 26, destroy is available since API 1)
+                if (Build.VERSION.SDK_INT >= 26) {
+                    process.destroyForcibly()
+                } else {
+                    process.destroy()
+                }
                 val duration = System.currentTimeMillis() - startTime
                 Logger.logWarn(LOG_TAG, "Command timed out after ${timeout}ms")
                 CommandResult(
