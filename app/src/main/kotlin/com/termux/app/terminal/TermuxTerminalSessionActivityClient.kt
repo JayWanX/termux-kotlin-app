@@ -10,6 +10,7 @@ import android.widget.ListView
 import com.termux.R
 import com.termux.app.TermuxActivity
 import com.termux.app.TermuxService
+import com.termux.app.styling.FontManager
 import com.termux.shared.interact.ShareUtils
 import com.termux.shared.logger.Logger
 import com.termux.shared.termux.TermuxConstants
@@ -406,7 +407,7 @@ class TermuxTerminalSessionActivityClient(private val mActivity: TermuxActivity)
             val newTypeface = if (fontFile.exists() && fontFile.length() > 0)
                 Typeface.createFromFile(fontFile)
             else
-                Typeface.MONOSPACE
+                FontManager(mActivity).loadFont(FontManager.DEFAULT_FONT_NAME)
             mActivity.terminalView.setTypeface(newTypeface)
         } catch (e: Exception) {
             Logger.logStackTraceWithMessage(LOG_TAG, "Error in checkForFontAndColors()", e)

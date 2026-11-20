@@ -42,7 +42,7 @@ class TerminalSettingsRepository @Inject constructor(
     // Default values
     companion object {
         const val DEFAULT_FONT_SIZE = 14
-        const val DEFAULT_FONT_FAMILY = "monospace"
+        const val DEFAULT_FONT_FAMILY = "jetbrains_mono_nerd"
         const val DEFAULT_CURSOR_BLINK = true
         const val DEFAULT_CURSOR_STYLE = "block"
         const val DEFAULT_BELL_ENABLED = true

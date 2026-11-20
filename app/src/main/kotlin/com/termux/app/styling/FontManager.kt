@@ -23,6 +23,9 @@ class FontManager @Inject constructor(
         private const val LOG_TAG = "FontManager"
         private const val CUSTOM_FONT_PATH = "/data/data/com.termux/files/home/.termux/font.ttf"
         private const val FONTS_DIR = "/data/data/com.termux/files/home/.termux/fonts"
+
+        /** Default terminal font bundled with the app (JetBrainsMono Nerd Font Mono). */
+        const val DEFAULT_FONT_NAME = "jetbrains_mono_nerd"
     }
     
     /**
@@ -42,6 +45,7 @@ class FontManager @Inject constructor(
         FontInfo("monospace", "Monospace", isBuiltIn = true),
         FontInfo("fira_code", "Fira Code", isBuiltIn = true),
         FontInfo("jetbrains_mono", "JetBrains Mono", isBuiltIn = true),
+        FontInfo("jetbrains_mono_nerd", "JetBrainsMono Nerd Font Mono", isBuiltIn = true),
         FontInfo("source_code_pro", "Source Code Pro", isBuiltIn = true),
         FontInfo("hack", "Hack", isBuiltIn = true),
         FontInfo("ubuntu_mono", "Ubuntu Mono", isBuiltIn = true),
@@ -52,7 +56,7 @@ class FontManager @Inject constructor(
     )
     
     private var currentFont: Typeface = Typeface.MONOSPACE
-    private var currentFontName: String = "default"
+    private var currentFontName: String = DEFAULT_FONT_NAME
     
     /**
      * Get all available fonts.

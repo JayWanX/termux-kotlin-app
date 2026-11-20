@@ -188,7 +188,7 @@ data class TermuxSettings(
 ) {
     object Defaults {
         const val FONT_SIZE = 14
-        const val FONT_FAMILY = "default"
+        const val FONT_FAMILY = "jetbrains_mono_nerd"
         const val THEME_NAME = "dark_steel"
         const val DYNAMIC_COLORS = false
         const val LINE_SPACING = 1.0f

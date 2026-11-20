@@ -79,7 +79,7 @@ class StylingManager @Inject constructor(
     }
     
     val currentFontName: Flow<String> = dataStore.data.map { 
-        it[KEY_CURRENT_FONT] ?: "default" 
+        it[KEY_CURRENT_FONT] ?: FontManager.DEFAULT_FONT_NAME 
     }
     
     val fontSize: Flow<Int> = dataStore.data.map { 
@@ -115,7 +115,7 @@ class StylingManager @Inject constructor(
         _currentScheme = getColorScheme(schemeName) ?: BuiltInColorSchemes.Default
         
         // Load saved font
-        val fontName = dataStore.data.first()[KEY_CURRENT_FONT] ?: "default"
+        val fontName = dataStore.data.first()[KEY_CURRENT_FONT] ?: FontManager.DEFAULT_FONT_NAME
         _currentFont = fontManager.loadFont(fontName)
         
         Logger.logInfo(LOG_TAG, "Styling initialized: scheme=$schemeName, font=$fontName")
