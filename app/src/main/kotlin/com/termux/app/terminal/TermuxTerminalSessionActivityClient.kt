@@ -234,6 +234,9 @@ class TermuxTerminalSessionActivityClient(private val mActivity: TermuxActivity)
             notifyOfSessionChange()
         }
 
+        // Keep the session list dialog's checked item in sync with the
+        // session that is actually attached to the terminal view.
+        refreshSessionListDialogIfShowing()
         updateBackgroundColor()
     }
 
@@ -367,6 +370,13 @@ class TermuxTerminalSessionActivityClient(private val mActivity: TermuxActivity)
         mActivity.termuxSessionListNotifyUpdated()
 
         // Keep the session list dialog in sync while it is open.
+        refreshSessionListDialogIfShowing()
+    }
+
+    /**
+     * Rebuild the session list dialog contents if it is currently shown.
+     */
+    private fun refreshSessionListDialogIfShowing() {
         val dialog = mSessionListDialog
         val adapter = mSessionListAdapter
         val service = mActivity.termuxService

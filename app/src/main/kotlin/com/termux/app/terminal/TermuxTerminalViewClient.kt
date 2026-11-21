@@ -100,8 +100,8 @@ class TermuxTerminalViewClient(
 
         // Re-apply the cursor style from termux.properties so that a changed
         // cursor shape takes effect without restarting the session.
-        val emulator = mActivity.terminalView.mEmulator
-        emulator?.setCursorStyle()
+        val emulator = mActivity.terminalView.mEmulator ?: return
+        emulator.setCursorStyle()
         mActivity.terminalView.onScreenUpdated()
     }
 

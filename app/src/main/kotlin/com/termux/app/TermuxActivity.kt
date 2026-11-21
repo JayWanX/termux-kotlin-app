@@ -207,6 +207,13 @@ class TermuxActivity : AppCompatActivity(), ServiceConnection {
         }
 
         registerTermuxActivityBroadcastReceiver()
+
+        // Styles may have been changed while another activity (e.g. the built-in
+        // styling screen) was in front, in which case the broadcast we send was
+        // lost because this activity had stopped. Re-apply styling on return so
+        // changes such as the cursor shape take effect.
+        reloadProperties()
+        mTermuxTerminalViewClient?.onReloadActivityStyling()
     }
 
     override fun onResume() {
@@ -547,11 +554,19 @@ class TermuxActivity : AppCompatActivity(), ServiceConnection {
     }
 
     private fun onResetTerminalSession(session: TerminalSession?) {
-        if (session != null) {
+        if (session == null) return
+
+        val b = AlertDialog.Builder(this)
+        b.setIcon(android.R.drawable.ic_dialog_alert)
+        b.setMessage(R.string.title_confirm_reset_terminal)
+        b.setPositiveButton(android.R.string.yes) { dialog, _ ->
+            dialog.dismiss()
             session.reset()
             showToast(resources.getString(R.string.msg_terminal_reset), true)
             mTermuxTerminalSessionActivityClient?.onResetTerminalSession()
         }
+        b.setNegativeButton(android.R.string.no, null)
+        b.show()
     }
 
     private fun toggleKeepScreenOn() {

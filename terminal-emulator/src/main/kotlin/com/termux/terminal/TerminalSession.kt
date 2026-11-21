@@ -204,11 +204,17 @@ class TerminalSession(
         val emulator = mEmulator ?: return
         // Reset the emulator's internal parser/margin/colour state.
         emulator.reset()
-        // Clear the scrollback transcript and the screen so the reset is
-        // actually visible to the user, then home the cursor.
+        // Clear the screen and the scrollback transcript.
         emulator.getScreen().clearTranscript()
         val clearSequence = "\u001b[2J\u001b[3J\u001b[H".toByteArray(Charsets.UTF_8)
         emulator.append(clearSequence, clearSequence.size)
+        // Ask the shell to redraw its prompt on the now empty screen (Ctrl+L is
+        // the readline "clear screen" binding). This keeps the prompt, e.g.
+        // "-bash-5.3$", visible after the reset.
+        if (isRunning) {
+            val ctrlL = byteArrayOf(0x0c)
+            write(ctrlL, 0, ctrlL.size)
+        }
         notifyScreenUpdate()
     }
 
