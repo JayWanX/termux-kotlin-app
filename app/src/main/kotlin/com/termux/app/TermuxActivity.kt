@@ -409,6 +409,49 @@ class TermuxActivity : AppCompatActivity(), ServiceConnection {
         terminalToolbarViewPager.layoutParams = layoutParams
     }
 
+    /**
+     * The text input page grows with its content between a minimum and a
+     * maximum height, so a single line takes little space while several lines
+     * stay fully visible.
+     *
+     * Heights are expressed in dp rather than toolbar row multiples because the
+     * text input page must be tall enough to contain the send button plus the
+     * container padding even for a single line of text.
+     *
+     * @param textInputHeightPx the measured content height, or 0 to use the
+     *        page's minimum height.
+     */
+    fun updateTerminalToolbarHeightForPage(page: Int, textInputHeightPx: Int = 0) {
+        val terminalToolbarViewPager = terminalToolbarViewPager ?: return
+
+        val layoutParams = terminalToolbarViewPager.layoutParams
+        val scaleFactor = mProperties?.getTerminalToolbarHeightScaleFactor() ?: 1f
+        val density = resources.displayMetrics.density
+
+        val newHeight = if (page == 1) {
+            val minHeight = (TEXT_INPUT_MIN_HEIGHT_DP * density * scaleFactor).toInt()
+            val maxHeight = (TEXT_INPUT_MAX_HEIGHT_DP * density * scaleFactor).toInt()
+            when {
+                textInputHeightPx <= 0 -> minHeight
+                textInputHeightPx < minHeight -> minHeight
+                textInputHeightPx > maxHeight -> maxHeight
+                else -> textInputHeightPx
+            }
+        } else {
+            // Bail out until the default row height has been measured.
+            if (mTerminalToolbarDefaultHeight <= 0f) return
+            val extraKeysInfo = mTermuxTerminalExtraKeys?.getExtraKeysInfo()
+            val matrix = extraKeysInfo?.getMatrix()
+            Math.round(mTerminalToolbarDefaultHeight * scaleFactor * (matrix?.size ?: 0)).toInt()
+        }
+
+        // Avoid redundant layout passes when the height does not change.
+        if (layoutParams.height == newHeight) return
+
+        layoutParams.height = newHeight
+        terminalToolbarViewPager.layoutParams = layoutParams
+    }
+
     fun toggleTerminalToolbar() {
         val terminalToolbarViewPager = terminalToolbarViewPager ?: return
 
@@ -789,6 +832,16 @@ class TermuxActivity : AppCompatActivity(), ServiceConnection {
 
         private const val ARG_TERMINAL_TOOLBAR_TEXT_INPUT = "terminal_toolbar_text_input"
         private const val ARG_ACTIVITY_RECREATED = "activity_recreated"
+
+        /**
+         * Height bounds for the text input page, in dp.
+         *
+         * The minimum must fit the 40dp send button plus the container's
+         * vertical padding (6dp top + 6dp bottom); 56dp leaves a little slack so
+         * a single line never clips the button.
+         */
+        private const val TEXT_INPUT_MIN_HEIGHT_DP = 56f
+        private const val TEXT_INPUT_MAX_HEIGHT_DP = 168f
 
         private const val LOG_TAG = "TermuxActivity"
 
