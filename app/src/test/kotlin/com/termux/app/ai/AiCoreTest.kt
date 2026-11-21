@@ -97,7 +97,7 @@ class OpenAiNormalizeTest {
             ChatMsg.system("second"),
             ChatMsg.user("hi"),
         )
-        val output = OpenAiClient.normalizeMessages(input)
+        val output = normalizeMessages(input)
         assertEquals(2, output.size)
         assertEquals(ChatMsg.ROLE_SYSTEM, output[0].role)
         assertEquals("first\n\nsecond", output[0].content)
@@ -111,7 +111,7 @@ class OpenAiNormalizeTest {
             ChatMsg.user("hello"),
             ChatMsg.system("mid-conversation note"),
         )
-        val output = OpenAiClient.normalizeMessages(input)
+        val output = normalizeMessages(input)
         assertEquals(ChatMsg.ROLE_SYSTEM, output[0].role)
         assertEquals(ChatMsg.ROLE_USER, output[1].role)
         assertEquals(ChatMsg.ROLE_USER, output[2].role)
@@ -120,7 +120,7 @@ class OpenAiNormalizeTest {
 
     @Test
     fun `empty history is returned unchanged`() {
-        assertTrue(OpenAiClient.normalizeMessages(emptyList()).isEmpty())
+        assertTrue(normalizeMessages(emptyList()).isEmpty())
     }
 
     @Test
@@ -129,7 +129,7 @@ class OpenAiNormalizeTest {
             ChatMsg.system("   "),
             ChatMsg.user("hi"),
         )
-        val output = OpenAiClient.normalizeMessages(input)
+        val output = normalizeMessages(input)
         assertEquals(1, output.size)
         assertEquals(ChatMsg.ROLE_USER, output[0].role)
     }
@@ -140,7 +140,7 @@ class OpenAiNormalizeTest {
             ChatMsg.system("rules"),
             ChatMsg.tool("call_1", "result"),
         )
-        val output = OpenAiClient.normalizeMessages(input)
+        val output = normalizeMessages(input)
         assertEquals("call_1", output[1].toolCallId)
     }
 }

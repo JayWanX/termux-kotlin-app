@@ -42,10 +42,31 @@ object FileSandbox {
         IOException("`$requested` is outside the permitted roots: ${roots.joinToString()}")
 
     /**
+     * Expands [path] against [home], without touching the filesystem.
+     *
+     * Split out of [resolve] so the rule can be tested on any host. That matters more than it looks:
+     * the previous implementation stripped the `~` and then asked `File.isAbsolute`, which turns `~/docs`
+     * into `/docs`. On POSIX that string is absolute, so `~/docs` resolved to the filesystem root and
+     * was refused; on Windows a leading `/` is *not* absolute, so the bug could not be reproduced — a
+     * test of [resolve] alone passed on the development machine and failed in CI.
+     *
+     * Deciding by string prefix keeps both hosts on the same path, and keeps `~` from ever being a
+     * route to absolutism.
+     */
+    fun expand(path: String, home: File): File = when {
+        path == "~" -> home
+        path.startsWith("~/") -> File(home, path.removePrefix("~/"))
+        // A bare `~user` is not a form this sandbox supports; treating it as a relative name is safer
+        // than silently reading another user's home.
+        File(path).isAbsolute -> File(path)
+        else -> File(home, path)
+    }
+
+    /**
      * Resolves [path] and proves it lies inside one of [roots].
      *
-     * `~` is expanded to the first root (the home directory). Relative paths resolve against that same
-     * root.
+     * `~` and `~/sub/path` are expanded against the first root (the home directory). Relative paths
+     * resolve against that same root; absolute paths are used as given, then checked.
      *
      * Symlinks are a real escape route: a link inside the root can point anywhere. `canonicalFile`
      * follows links, but a **dangling or pre-existing** link whose target is outside must also be
@@ -61,9 +82,7 @@ object FileSandbox {
         require(trimmed.isNotEmpty()) { "path must not be empty" }
 
         val home = File(roots.first()).canonicalFile
-        val expanded = if (trimmed == "~") home.path else trimmed.removePrefix("~")
-
-        val candidate = if (File(expanded).isAbsolute) File(expanded) else File(home, expanded)
+        val candidate = expand(trimmed, home)
         val canonical = try {
             candidate.canonicalFile
         } catch (e: IOException) {

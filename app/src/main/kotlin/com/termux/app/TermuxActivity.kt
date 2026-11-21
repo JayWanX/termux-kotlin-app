@@ -17,6 +17,7 @@ import android.view.ContextMenu.ContextMenuInfo
 import android.view.Gravity
 import android.view.Menu
 import android.view.MenuItem
+import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.EditText
@@ -107,6 +108,20 @@ class TermuxActivity : AppCompatActivity(), ServiceConnection {
 
     /** Container the assistant panel is mounted into, created lazily. */
     private var aiPanelContainer: FrameLayout? = null
+
+    /** True when the side panel is narrow enough that labels should be abbreviated. */
+    private var aiPanelIsCompact: Boolean = false
+
+    /** Where the current edge swipe began, and whether one is in progress. */
+    private var assistantGestureStartX: Float = 0f
+    private var assistantGestureStartY: Float = 0f
+    private var assistantGestureTracking: Boolean = false
+
+    /** True once the current edge gesture has moved enough to be a drag rather than a tap. */
+    private var assistantGestureMoved: Boolean = false
+
+    /** The last tap seen on the edge strip, kept so the next one can complete a double tap. */
+    private var assistantEdgeTap: com.termux.app.ai.EdgeSwipe.Tap? = null
 
     /** The [com.termux.view.TerminalViewClient] interface implementation. */
     var mTermuxTerminalViewClient: TermuxTerminalViewClient? = null
@@ -595,13 +610,17 @@ class TermuxActivity : AppCompatActivity(), ServiceConnection {
             .isCheckable = true
         menu.findItem(CONTEXT_MENU_TOGGLE_KEEP_SCREEN_ON)?.isChecked = mPreferences?.shouldKeepScreenOn() == true
         menu.add(Menu.NONE, CONTEXT_MENU_HELP_ID, Menu.NONE, R.string.action_open_help)
-        menu.add(Menu.NONE, CONTEXT_MENU_SETTINGS_ID, Menu.NONE, R.string.action_open_settings)
         // The assistant entry only exists when the user has enabled and configured it. This must not
         // consult aiPanelController: that is null until the panel is first opened, so gating on it
         // would leave the entry permanently unreachable.
+        //
+        // It is listed before Settings because the assistant is an action taken on this terminal,
+        // while Settings leaves the terminal behind; the two entries the user actually alternates
+        // between end up adjacent instead of separated by a navigation item.
         if (com.termux.app.ai.AiConfig.get(this).isUsable()) {
             menu.add(Menu.NONE, CONTEXT_MENU_ASSISTANT_ID, Menu.NONE, R.string.assistant_menu_entry)
         }
+        menu.add(Menu.NONE, CONTEXT_MENU_SETTINGS_ID, Menu.NONE, R.string.action_open_settings)
     }
 
     /** Hook system menu to show context menu instead. */
@@ -877,6 +896,7 @@ class TermuxActivity : AppCompatActivity(), ServiceConnection {
         if (terminalControlImpl == null) createTerminalControl()
         terminalControlImpl?.start()
         startStatusStrip()
+        installAssistantEdgeGesture()
 
         // Bind the optional assistant to the same terminal. This is the only coupling between the
         // terminal and the assistant; deleting the ai package turns it into a no-op.
@@ -890,6 +910,10 @@ class TermuxActivity : AppCompatActivity(), ServiceConnection {
         } else {
             com.termux.app.ai.AiAssistant.detach()
         }
+
+        // The assistant may have been enabled or disabled while this activity was stopped, so the edge
+        // exclusion is re-evaluated on every resume rather than once in onCreate.
+        syncGestureExclusion()
     }
 
     private fun stopTerminalControl() {
@@ -986,6 +1010,7 @@ class TermuxActivity : AppCompatActivity(), ServiceConnection {
                 lifecycleOwner = this,
                 container = container,
                 terminal = terminalControl,
+                compact = aiPanelIsCompact,
             )
             aiPanelController = created
             created
@@ -995,6 +1020,8 @@ class TermuxActivity : AppCompatActivity(), ServiceConnection {
             Toast.makeText(this, R.string.assistant_not_configured, Toast.LENGTH_LONG).show()
             return
         }
+        // Re-apply the toolbar anchor: it may have been toggled since the container was created.
+        alignAiPanelToToolbar()
         controller.toggle()
     }
 
@@ -1002,48 +1029,222 @@ class TermuxActivity : AppCompatActivity(), ServiceConnection {
     private fun ensureAiPanelContainer(): FrameLayout {
         aiPanelContainer?.let { return it }
 
-        // The overlay must live in the relative layout so it covers the terminal.
-        //
-        // `generateLayoutParams(null)` is not usable here: RelativeLayout throws
-        // "You must supply a layout_width attribute" when handed an empty attribute set. Constructing
-        // the parent's own LayoutParams type directly is the safe way to get both a matching type and
-        // the required width/height.
+        // The panel is a side sheet, not a full-screen replacement: the assistant's purpose is to act on
+        // the terminal, so the terminal must stay visible while reading replies. A full-width overlay
+        // would force the user to close the panel to see what it did.
         val parent = findViewById<ViewGroup>(R.id.activity_termux_root_relative_layout)
             ?: findViewById<ViewGroup>(android.R.id.content)
             ?: error("no view group to host the assistant panel")
 
+        val width = assistantPanelWidth()
         val container = FrameLayout(this)
+
+        // The panel stops above the quick-input toolbar rather than covering it. That bar is how the user
+        // types into the terminal at all, so a panel that hid it would force closing the assistant to
+        // run the command it just proposed — the opposite of what the panel is for. Anchoring to the
+        // toolbar's top edge keeps both live at once; when the toolbar is hidden the panel simply
+        // extends to the bottom.
+        val toolbar = findViewById<View>(R.id.terminal_toolbar_view_pager)
+        val hasToolbar = toolbar != null && toolbar.visibility == View.VISIBLE
+
         val params: ViewGroup.LayoutParams = when (parent) {
             is android.widget.RelativeLayout ->
-                android.widget.RelativeLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                )
+                android.widget.RelativeLayout.LayoutParams(width, ViewGroup.LayoutParams.MATCH_PARENT)
+                    .apply {
+                        addRule(android.widget.RelativeLayout.ALIGN_PARENT_RIGHT)
+                        when (com.termux.app.ai.PanelAnchor.bottom(hasToolbar)) {
+                            com.termux.app.ai.PanelAnchor.Bottom.ABOVE_TOOLBAR ->
+                                addRule(android.widget.RelativeLayout.ABOVE, R.id.terminal_toolbar_view_pager)
+                            com.termux.app.ai.PanelAnchor.Bottom.SCREEN_BOTTOM ->
+                                addRule(android.widget.RelativeLayout.ALIGN_PARENT_BOTTOM)
+                        }
+                    }
             is android.widget.LinearLayout ->
-                android.widget.LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                )
+                android.widget.LinearLayout.LayoutParams(width, ViewGroup.LayoutParams.MATCH_PARENT)
             is FrameLayout ->
-                FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                )
-            else -> ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT,
-            )
+                FrameLayout.LayoutParams(width, ViewGroup.LayoutParams.MATCH_PARENT)
+                    .apply { gravity = android.view.Gravity.END }
+            else -> ViewGroup.LayoutParams(width, ViewGroup.LayoutParams.MATCH_PARENT)
         }
         container.layoutParams = params
         container.visibility = View.GONE
-        container.setBackgroundColor(0xEE000000.toInt())
+        // Transparent, not a coloured scrim: the panel draws its own rounded surface, and a filled
+        // container would square off the corners behind it.
+        container.setBackgroundColor(android.graphics.Color.TRANSPARENT)
         container.isClickable = true
         container.isFocusable = true
 
         parent.addView(container)
         aiPanelContainer = container
+        aiPanelIsCompact = width < dp(320)
         return container
     }
+
+    /**
+     * Re-anchors the panel above the quick-input toolbar.
+     *
+     * The toolbar can be shown or hidden while the panel is already mounted (the settings toggle and the
+     * on-page switch both do it), so the rule has to be re-applied rather than decided once when the
+     * container is created.
+     */
+    private fun alignAiPanelToToolbar() {
+        val container = aiPanelContainer ?: return
+        val parent = container.parent as? android.widget.RelativeLayout ?: return
+        val params = container.layoutParams as? android.widget.RelativeLayout.LayoutParams ?: return
+
+        val toolbar = findViewById<View>(R.id.terminal_toolbar_view_pager)
+        val hasToolbar = toolbar != null && toolbar.visibility == View.VISIBLE
+
+        params.removeRule(android.widget.RelativeLayout.ABOVE)
+        params.removeRule(android.widget.RelativeLayout.ALIGN_PARENT_BOTTOM)
+        when (com.termux.app.ai.PanelAnchor.bottom(hasToolbar)) {
+            com.termux.app.ai.PanelAnchor.Bottom.ABOVE_TOOLBAR ->
+                params.addRule(android.widget.RelativeLayout.ABOVE, R.id.terminal_toolbar_view_pager)
+            com.termux.app.ai.PanelAnchor.Bottom.SCREEN_BOTTOM ->
+                params.addRule(android.widget.RelativeLayout.ALIGN_PARENT_BOTTOM)
+        }
+        container.layoutParams = params
+        parent.requestLayout()
+    }
+
+    /**
+     * Width of the side panel.
+     *
+     * The panel sits beside the terminal rather than over it; see [com.termux.app.ai.PanelMetrics] for
+     * the rule and the reasons behind its bounds.
+     */
+    private fun assistantPanelWidth(): Int = com.termux.app.ai.PanelMetrics.widthPx(
+        screenWidthPx = resources.displayMetrics.widthPixels,
+        density = resources.displayMetrics.density,
+    )
+
+    /**
+     * Offers the right-edge swipe to the assistant, if it is available.
+     *
+     * The observer is installed on the root view rather than the relative layout. A touch listener on a
+     * parent is only consulted when no child consumes the event, and the terminal consumes every touch,
+     * so the earlier listener never ran at all. [TermuxActivityRootView.dispatchTouchEvent] sees the
+     * event first regardless of who ends up handling it.
+     *
+     * The observer never consumes anything: it watches the drag and opens the panel when it recognises
+     * the gesture. Swallowing events would have to start at ACTION_DOWN, before the direction is known,
+     * and would take the edge strip away from the terminal for scrolling and text selection.
+     *
+     * The decision is made per event rather than once at startup, so enabling the assistant in Settings
+     * takes effect on the next swipe; while it is disabled every event is inspected and ignored.
+     */
+    private fun installAssistantEdgeGesture() {
+        val root = mTermuxActivityRootView ?: return
+
+        val edgeWidth = dp(ASSISTANT_EDGE_GESTURE_WIDTH_DP)
+        val innerEdgeWidth = dp(ASSISTANT_EDGE_GESTURE_INNER_DP).toFloat()
+        val threshold = dp(ASSISTANT_EDGE_GESTURE_THRESHOLD_DP).toFloat()
+        val drift = dp(ASSISTANT_EDGE_GESTURE_MAX_DRIFT_DP).toFloat()
+        val tapSlop = dp(ASSISTANT_EDGE_DOUBLE_TAP_SLOP_DP).toFloat()
+
+        root.touchObserver = object : TermuxActivityRootView.TouchObserver {
+            override fun onTouch(event: MotionEvent, rootWidth: Int) {
+                if (rootWidth <= 0) return
+
+                // This runs for every touch event in the app, including every MOVE of every scroll, so
+                // the expensive question ("is the assistant configured?") is asked once at the start of
+                // a gesture rather than on each event.
+                if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+                    val inStrip = com.termux.app.ai.EdgeSwipe.startsInEdgeZone(
+                        startX = event.x,
+                        rootWidthPx = rootWidth,
+                        innerWidthPx = innerEdgeWidth,
+                    )
+                    assistantGestureTracking =
+                        inStrip &&
+                            aiPanelController?.isVisible() != true &&
+                            com.termux.app.ai.AiConfig.get(this@TermuxActivity).isUsable()
+                    assistantGestureStartX = event.x
+                    assistantGestureStartY = event.y
+                    assistantGestureMoved = false
+                    return
+                }
+
+                if (!assistantGestureTracking) return
+
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_MOVE -> {
+                        val dx = event.x - assistantGestureStartX
+                        val dy = event.y - assistantGestureStartY
+                        // Any real movement disqualifies this gesture from being a tap, so a swipe that
+                        // ends inside the strip cannot also register as a double tap.
+                        if (kotlin.math.abs(dx) > tapSlop || kotlin.math.abs(dy) > tapSlop) {
+                            assistantGestureMoved = true
+                        }
+                        if (com.termux.app.ai.EdgeSwipe.shouldOpen(dx, threshold, dy, drift)) {
+                            // Opening on the crossing rather than on release makes the panel appear
+                            // while the finger is still moving, which is what makes it feel deliberate.
+                            assistantGestureTracking = false
+                            assistantEdgeTap = null
+                            toggleAssistantPanel()
+                        }
+                    }
+
+                    MotionEvent.ACTION_UP -> {
+                        assistantGestureTracking = false
+                        // A tap that never moved may be the second half of a double tap.
+                        if (!assistantGestureMoved) {
+                            val now = android.os.SystemClock.elapsedRealtime()
+                            val tap = com.termux.app.ai.EdgeSwipe.Tap(event.x, event.y, now)
+                            val previous = assistantEdgeTap
+                            if (com.termux.app.ai.EdgeSwipe.isEdgeDoubleTap(
+                                    previous,
+                                    tap,
+                                    // The double tap stays confined to the narrow edge strip. A double
+                                    // tap is already a terminal gesture (word selection), so widening
+                                    // its zone would make ordinary text selection open the panel.
+                                    edgeLeftX = (rootWidth - edgeWidth).toFloat(),
+                                    slopPx = tapSlop,
+                                    timeoutMs = ASSISTANT_EDGE_DOUBLE_TAP_TIMEOUT_MS,
+                                )
+                            ) {
+                                assistantEdgeTap = null
+                                toggleAssistantPanel()
+                            } else {
+                                assistantEdgeTap = tap
+                                // Expire the pending tap so a later unrelated tap is not paired with it.
+                                root.postDelayed(
+                                    { assistantEdgeTap = null },
+                                    ASSISTANT_EDGE_DOUBLE_TAP_TIMEOUT_MS,
+                                )
+                            }
+                        }
+                    }
+
+                    MotionEvent.ACTION_CANCEL -> {
+                        assistantGestureTracking = false
+                        assistantGestureMoved = false
+                    }
+                }
+            }
+        }
+
+        syncGestureExclusion()
+    }
+
+    /**
+     * Claims or releases the right screen edge, depending on whether the assistant is available.
+     *
+     * The exclusion is what lets a swipe be seen at all under gesture navigation, but claiming it means
+     * the system Back gesture no longer starts there. That cost is only worth paying for a user who has
+     * actually enabled the assistant; for everyone else the edge must stay with the system.
+     *
+     * Called on every resume as well, so enabling or disabling the assistant in Settings takes effect
+     * without a restart.
+     */
+    private fun syncGestureExclusion() {
+        val root = mTermuxActivityRootView ?: return
+        val usable = com.termux.app.ai.AiConfig.get(this).isUsable()
+        root.gestureExclusionWidth = if (usable) dp(ASSISTANT_EDGE_GESTURE_WIDTH_DP) else 0
+    }
+
+    private fun dp(value: Int): Int =
+        (value * resources.displayMetrics.density).toInt()
 
     val preferences: TermuxAppSharedPreferences?
         get() = mPreferences
@@ -1141,6 +1342,48 @@ class TermuxActivity : AppCompatActivity(), ServiceConnection {
         private const val CONTEXT_MENU_HELP_ID = 7
         private const val CONTEXT_MENU_SETTINGS_ID = 8
         private const val CONTEXT_MENU_ASSISTANT_ID = 9
+
+        /** Width of the right-edge strip that accepts the open gesture. */
+        private const val ASSISTANT_EDGE_GESTURE_WIDTH_DP = 20
+
+        /**
+         * How far from the right edge a drag may still start and count as an edge gesture.
+         *
+         * Wider than the system's own gesture zone on purpose. The system intercepts roughly the
+         * outermost 20dp, and an app can only reclaim part of that edge via a gesture exclusion the
+         * platform caps at 200dp of height — so a swipe starting at the top or bottom of the screen is
+         * lost as Back. Extending the accepted start zone inwards means the gesture works everywhere,
+         * without depending on an exclusion that only partially applies.
+         */
+        private const val ASSISTANT_EDGE_GESTURE_INNER_DP = 44
+
+        /**
+         * Horizontal distance that counts as a deliberate swipe.
+         *
+         * Was 40dp, which combined with the 20dp strip made the gesture need a long, perfectly
+         * horizontal drag from a narrow starting zone. 18dp is a flick, which is what the gesture is
+         * for; the vertical-drift ceiling below is what keeps it from firing during a scroll.
+         */
+        private const val ASSISTANT_EDGE_GESTURE_THRESHOLD_DP = 18
+
+        /**
+         * Vertical travel still tolerated during a horizontal edge swipe.
+         *
+         * Without this the relaxed threshold would open the panel on the diagonal opening of a scroll
+         * that happened to start near the right edge.
+         */
+        private const val ASSISTANT_EDGE_GESTURE_MAX_DRIFT_DP = 40
+
+        /** Maximum distance between the two taps of an edge double tap. */
+        private const val ASSISTANT_EDGE_DOUBLE_TAP_SLOP_DP = 48
+
+        /**
+         * Maximum gap between the two taps of an edge double tap.
+         *
+         * Longer than the platform's 300ms double-tap window: this gesture has to be discoverable and is
+         * not competing with a text-selection double tap inside the terminal body.
+         */
+        private const val ASSISTANT_EDGE_DOUBLE_TAP_TIMEOUT_MS = 400L
 
         private const val ARG_TERMINAL_TOOLBAR_TEXT_INPUT = "terminal_toolbar_text_input"
         private const val ARG_ACTIVITY_RECREATED = "activity_recreated"

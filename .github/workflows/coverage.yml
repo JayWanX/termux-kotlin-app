@@ -29,11 +29,83 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      - name: Run tests with coverage
-        run: ./gradlew testDebugUnitTest jacocoTestReport --no-daemon
-        continue-on-error: true
+      # Robolectric fetches a pre-instrumented android-all jar per SDK level on first use, and these are
+      # 100-190MB each. Without a cache every run pays that download again, and a slow fetch fails every
+      # Robolectric test at once -- which is what a "192 of 277 failed" report looks like.
+      - name: Cache Robolectric Android jars
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository/org/robolectric
+          key: robolectric-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml') }}
+          restore-keys: |
+            robolectric-${{ runner.os }}-
 
+      - name: Run tests with coverage
+        # No continue-on-error: a failing test must fail this job. It previously swallowed test
+        # failures, so for as long as this workflow existed a red suite still reported green — which
+        # is how the broken `~/sub/path` sandbox expansion stayed hidden.
+        #
+        # The task is module-qualified: `jacocoTestReport` is registered by :app only. Running it at the
+        # root is what produced "Task 'jacocoTestReport' not found", a failure this workflow had been
+        # hiding behind continue-on-error since it was written; no coverage was ever collected.
+        run: ./gradlew :app:testDebugUnitTest :app:jacocoTestReport --no-daemon
+
+      # A failing Gradle test task reports only a count. The names and messages live in the JUnit XML,
+      # and getting them onto the summary page is the difference between diagnosing a CI-only failure and
+      # guessing at it -- this workflow had no such step while the tests job did.
+      - name: Summarize failing tests
+        if: failure()
+        run: |
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import glob
+          import xml.etree.ElementTree as ET
+
+          total = failures = 0
+          rows = []
+          for path in glob.glob('**/build/test-results/**/*.xml', recursive=True):
+              try:
+                  root = ET.parse(path).getroot()
+              except ET.ParseError:
+                  continue
+              for suite in ([root] if root.tag == 'testsuite' else root.iter('testsuite')):
+                  total += int(suite.get('tests', 0))
+                  for case in suite.iter('testcase'):
+                      problems = list(case.findall('failure')) + list(case.findall('error'))
+                      if not problems:
+                          continue
+                      failures += 1
+                      text = (problems[0].text or problems[0].get('message') or '').strip()
+                      rows.append((
+                          f"{case.get('classname', '')}.{case.get('name', '')}",
+                          text.splitlines()[0][:300] if text else '',
+                      ))
+
+          print("## Coverage run: test results\n")
+          print(f"- total: **{total}**")
+          print(f"- failed: **{failures}**\n")
+          for name, message in rows[:50]:
+              print(f"- `{name}`")
+              if message:
+                  print(f"  > {message}")
+          if len(rows) > 50:
+              print(f"\n_...and {len(rows) - 50} more._")
+          if not rows:
+              print("_No JUnit failure records; the task failed before running tests._")
+          PY
+
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-test-results
+          path: '**/build/test-results/**/*.xml'
+          if-no-files-found: warn
+
+      # The uploads still run when the tests fail, so a failing run keeps whatever coverage was
+      # produced instead of discarding it. Failing the job and reporting coverage are not in conflict:
+      # `if: always()` decouples them, which is what continue-on-error was wrongly being used for.
       - name: Upload coverage to Codecov
+        if: always()
         uses: codecov/codecov-action@v5
         with:
           files: '**/build/reports/jacoco/**/*.xml'
@@ -43,8 +115,8 @@ jobs:
           verbose: true
 
       - name: Upload coverage reports
-        uses: actions/upload-artifact@v6
         if: always()
+        uses: actions/upload-artifact@v6
         with:
           name: coverage-reports
           path: '**/build/reports/jacoco/**'

@@ -1,74 +1,32 @@
 package com.termux.app.terminal
 
-import com.termux.shared.terminal.SessionInfo
 import com.termux.shared.terminal.TerminalState
 
 /**
- * Formats a session row for the session list.
+ * Text helpers for the session list.
  *
- * Kept separate from the dialog so the formatting can be unit-tested: what a row says about a session
- * is the part users actually rely on, and it is easy to get subtly wrong (a dead session that looks
- * alive is worse than no indicator at all).
+ * Kept separate from the row builder so the wording can be unit-tested independently of layout: what a
+ * row *says* about a session is the part users rely on, and a dead session that reads as healthy is worse
+ * than no indicator at all.
+ *
+ * This previously also built a single-line label (`<glyph> <name> [<index>] <title> · <cwd>`) for a plain
+ * text adapter. The list now renders structured rows, so that formatter was deleted rather than left
+ * behind with tests covering a function nothing called.
+ *
+ * The glyph table went with it. The first version drew a `│` for idle sessions, which read as a divider
+ * glued to the front of every name; replacing it with circles fixed the appearance but left the row
+ * saying the same thing twice — a `●` glyph and the word "running" directly under it. The word is the
+ * better half (it survives colour blindness, and `exit 127` is more precise than any symbol), so the
+ * glyph column is gone and the row keeps colour plus text.
  */
 object SessionLabelFormatter {
 
-    /** Glyph shown before the name, chosen so it reads at a glance. */
-    fun statusGlyph(state: TerminalState): String = when (state) {
-        TerminalState.NoSession -> "○"
-        is TerminalState.Busy -> "●"
-        is TerminalState.Idle -> "│"
-        is TerminalState.Dead -> "×"
-    }
-
-    /**
-     * Builds the label for one session.
-     *
-     * Format: `<glyph> <name> [<index>] <title> · <cwd>`
-     *
-     * The index is included because the "More" menu and keyboard shortcuts refer to sessions by number.
-     *
-     * @param index one-based position in the session list.
-     * @param info the session snapshot.
-     * @param name the user-assigned name, which may be blank.
-     * @param title the terminal title reported by the shell, which may be blank.
-     * @param maxCwdChars how much of the working directory to show before eliding the middle.
-     */
-    fun format(
-        index: Int,
-        info: SessionInfo,
-        name: String?,
-        title: String?,
-        maxCwdChars: Int = 40,
-    ): String {
-        val displayName = name?.takeIf { it.isNotBlank() } ?: "Session"
-        val builder = StringBuilder()
-        builder.append(statusGlyph(info.state))
-        builder.append(' ')
-        builder.append(displayName)
-        builder.append(" [").append(index).append(']')
-
-        if (info.isRunning && info.state is TerminalState.Dead) {
-            // Inconsistent inputs should not produce a row that looks healthy.
-            builder.append(" (?)")
-        }
-        if (!info.isRunning) {
-            val status = info.exitStatus
-            builder.append(if (status != null) " (exit $status)" else " (exited)")
-        }
-
-        title?.takeIf { it.isNotBlank() && it != name }?.let {
-            builder.append(' ').append(it)
-        }
-
-        info.cwd?.takeIf { it.isNotBlank() }?.let { cwd ->
-            builder.append(" · ").append(elideMiddle(cwd, maxCwdChars))
-        }
-
-        if (info.isAltBuffer) {
-            builder.append(" [fullscreen]")
-        }
-
-        return builder.toString()
+    /** A short word for the state, shown as the row's status line. */
+    fun statusLabel(state: TerminalState): String = when (state) {
+        TerminalState.NoSession -> "no session"
+        is TerminalState.Busy -> "running"
+        is TerminalState.Idle -> "idle"
+        is TerminalState.Dead -> state.exitStatus?.let { "exit $it" } ?: "exited"
     }
 
     /**
