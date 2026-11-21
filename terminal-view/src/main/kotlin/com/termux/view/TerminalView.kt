@@ -426,8 +426,7 @@ class TerminalView(context: Context, attributes: AttributeSet?) : View(context, 
 
     /**
      * This must be called by the hosting activity in [Activity.onContextMenuClosed]
-     * when context menu for the [TerminalView] is started by
-     * [TextSelectionCursorController.ACTION_MORE] is closed.
+     * when the context menu for the [TerminalView] is closed.
      */
     fun onContextMenuClosed(menu: Menu) {
         // Unset the stored text since it shouldn't be used anymore and should be cleared from memory

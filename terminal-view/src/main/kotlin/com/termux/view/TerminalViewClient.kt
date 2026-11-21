@@ -32,6 +32,12 @@ interface TerminalViewClient {
 
     fun copyModeChanged(copyMode: Boolean)
 
+    /** Called when "Select URL" is chosen from the text selection toolbar. */
+    fun onSelectUrl()
+
+    /** Called when "Share transcript" is chosen from the text selection toolbar. */
+    fun onShareTranscript()
+
     fun onKeyDown(keyCode: Int, e: KeyEvent, session: TerminalSession): Boolean
 
     fun onKeyUp(keyCode: Int, e: KeyEvent): Boolean

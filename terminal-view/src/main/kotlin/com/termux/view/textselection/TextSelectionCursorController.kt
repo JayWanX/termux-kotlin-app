@@ -33,7 +33,8 @@ class TextSelectionCursorController(private val terminalView: TerminalView) : Cu
     private var mActionMode: ActionMode? = null
     val ACTION_COPY = 1
     val ACTION_PASTE = 2
-    val ACTION_MORE = 3
+    val ACTION_SELECT_URL = 3
+    val ACTION_SHARE_TRANSCRIPT = 4
 
     override fun show(event: MotionEvent) {
         setInitialTextSelectionPosition(event)
@@ -106,7 +107,10 @@ class TextSelectionCursorController(private val terminalView: TerminalView) : Cu
                 menu.add(Menu.NONE, ACTION_COPY, Menu.NONE, R.string.copy_text).setShowAsAction(show)
                 menu.add(Menu.NONE, ACTION_PASTE, Menu.NONE, R.string.paste_text)
                     .setEnabled(clipboard?.hasPrimaryClip() == true).setShowAsAction(show)
-                menu.add(Menu.NONE, ACTION_MORE, Menu.NONE, R.string.text_selection_more)
+                menu.add(Menu.NONE, ACTION_SELECT_URL, Menu.NONE, R.string.select_url_text)
+                    .setShowAsAction(show)
+                menu.add(Menu.NONE, ACTION_SHARE_TRANSCRIPT, Menu.NONE, R.string.share_transcript_text)
+                    .setShowAsAction(show)
                 return true
             }
 
@@ -128,15 +132,17 @@ class TextSelectionCursorController(private val terminalView: TerminalView) : Cu
                         terminalView.stopTextSelectionMode()
                         terminalView.mTermSession!!.onPasteTextFromClipboard()
                     }
-                    ACTION_MORE -> {
-                        // We first store the selected text in case TerminalViewClient needs the
-                        // selected text before MORE button was pressed since we are going to
-                        // stop selection mode
+                    ACTION_SELECT_URL -> {
+                        // Store the selected text before leaving selection mode, since
+                        // the client may need it.
                         mStoredSelectedText = getSelectedText()
-                        // The text selection needs to be stopped before showing context menu,
-                        // otherwise handles will show above popup
                         terminalView.stopTextSelectionMode()
-                        terminalView.showContextMenu()
+                        terminalView.mClient?.onSelectUrl()
+                    }
+                    ACTION_SHARE_TRANSCRIPT -> {
+                        mStoredSelectedText = getSelectedText()
+                        terminalView.stopTextSelectionMode()
+                        terminalView.mClient?.onShareTranscript()
                     }
                 }
 

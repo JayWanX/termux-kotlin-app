@@ -34,6 +34,12 @@ open class TermuxTerminalViewClientBase : TerminalViewClient {
     override fun copyModeChanged(copyMode: Boolean) {
     }
 
+    override fun onSelectUrl() {
+    }
+
+    override fun onShareTranscript() {
+    }
+
     override fun onKeyDown(keyCode: Int, e: KeyEvent, session: TerminalSession): Boolean {
         return false
     }

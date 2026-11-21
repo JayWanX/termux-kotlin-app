@@ -7,6 +7,9 @@ import android.media.AudioAttributes
 import android.media.SoundPool
 import android.text.TextUtils
 import android.view.Menu
+import android.view.View
+import android.widget.ArrayAdapter
+import android.widget.ListView
 import android.widget.PopupMenu
 import com.termux.R
 import com.termux.app.TermuxActivity
@@ -433,37 +436,68 @@ class TermuxTerminalSessionActivityClient(private val mActivity: TermuxActivity)
 
         val currentIndex = service.getIndexOfSession(mActivity.currentSession)
 
-        AlertDialog.Builder(mActivity)
+        // Use a plain ListView adapter instead of setSingleChoiceItems so that
+        // item long presses can be handled (to rename a session in place).
+        val listAdapter = ArrayAdapter(
+            mActivity,
+            android.R.layout.simple_list_item_single_choice,
+            sessions
+        )
+
+        val dialog = AlertDialog.Builder(mActivity)
             .setTitle(R.string.title_session_list)
-            .setSingleChoiceItems(
-                sessions.toTypedArray(), currentIndex
-            ) { dialog, which ->
+            .setAdapter(
+                listAdapter
+            ) { d, which ->
                 switchToSession(which)
-                dialog.dismiss()
+                d.dismiss()
             }
-            .setNeutralButton(R.string.action_session_list_more) { _, _ ->
-                showSessionMoreMenu()
-            }
+            .setNeutralButton(R.string.action_session_list_more, null)
             .setNegativeButton(R.string.action_new_session) { _, _ ->
                 addNewSession(false, null)
             }
             .setPositiveButton(R.string.action_session_list_close, null)
-            .show()
+            .create()
+
+        // Bind the "More" button manually so that clicking it neither dismisses
+        // the dialog nor rebuilds it, and so the popup can be anchored directly
+        // below the button.
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL)?.setOnClickListener { moreButton ->
+                showSessionMoreMenu(moreButton)
+            }
+
+            // Mark the current session as the checked item.
+            dialog.listView?.apply {
+                choiceMode = ListView.CHOICE_MODE_SINGLE
+                if (currentIndex in sessions.indices) {
+                    setItemChecked(currentIndex, true)
+                }
+                setOnItemLongClickListener { _, _, position, _ ->
+                    val termuxSession = service.getTermuxSession(position)
+                        ?: return@setOnItemLongClickListener false
+                    renameSession(termuxSession.terminalSession)
+                    true
+                }
+            }
+        }
+
+        dialog.show()
     }
 
     /**
-     * Show the "More" popup menu for the session list dialog.
+     * Show the "More" popup menu anchored below the "More" button.
      *
      * Provides three actions:
      * - Create a new system session
      * - Finish all other sessions, keeping the current one
      * - Finish all sessions
      */
-    private fun showSessionMoreMenu() {
+    private fun showSessionMoreMenu(anchor: View) {
         val service = mActivity.termuxService ?: return
         val currentSession = mActivity.currentSession
 
-        PopupMenu(mActivity, mActivity.terminalView).apply {
+        PopupMenu(mActivity, anchor).apply {
             menu.add(Menu.NONE, MENU_NEW_SYSTEM_SESSION, Menu.NONE, R.string.action_new_system_session)
             menu.add(Menu.NONE, MENU_FINISH_OTHER_SESSIONS, Menu.NONE, R.string.action_finish_other_sessions)
             menu.add(Menu.NONE, MENU_FINISH_ALL_SESSIONS, Menu.NONE, R.string.action_finish_all_sessions)

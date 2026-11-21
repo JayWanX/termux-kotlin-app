@@ -482,7 +482,6 @@ class TermuxActivity : AppCompatActivity(), ServiceConnection {
         menu.findItem(CONTEXT_MENU_TOGGLE_KEEP_SCREEN_ON)?.isChecked = mPreferences?.shouldKeepScreenOn() == true
         menu.add(Menu.NONE, CONTEXT_MENU_HELP_ID, Menu.NONE, R.string.action_open_help)
         menu.add(Menu.NONE, CONTEXT_MENU_SETTINGS_ID, Menu.NONE, R.string.action_open_settings)
-        menu.add(Menu.NONE, CONTEXT_MENU_REPORT_ID, Menu.NONE, R.string.action_report_issue)
     }
 
     /** Hook system menu to show context menu instead. */
@@ -537,10 +536,6 @@ class TermuxActivity : AppCompatActivity(), ServiceConnection {
             }
             CONTEXT_MENU_SETTINGS_ID -> {
                 ActivityUtils.startActivity(this, Intent(this, SettingsActivity::class.java))
-                true
-            }
-            CONTEXT_MENU_REPORT_ID -> {
-                mTermuxTerminalViewClient?.reportIssueFromTranscript()
                 true
             }
             else -> super.onContextItemSelected(item)
@@ -800,7 +795,6 @@ class TermuxActivity : AppCompatActivity(), ServiceConnection {
         private const val CONTEXT_MENU_TOGGLE_KEEP_SCREEN_ON = 6
         private const val CONTEXT_MENU_HELP_ID = 7
         private const val CONTEXT_MENU_SETTINGS_ID = 8
-        private const val CONTEXT_MENU_REPORT_ID = 9
 
         private const val ARG_TERMINAL_TOOLBAR_TEXT_INPUT = "terminal_toolbar_text_input"
         private const val ARG_ACTIVITY_RECREATED = "activity_recreated"

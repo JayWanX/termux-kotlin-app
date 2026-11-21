@@ -4,7 +4,6 @@ import android.annotation.SuppressLint
 import android.app.AlertDialog
 import android.content.Context
 import android.media.AudioManager
-import android.os.Environment
 import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.MotionEvent
@@ -13,21 +12,11 @@ import android.widget.EditText
 import android.widget.ListView
 import com.termux.R
 import com.termux.app.TermuxActivity
-import com.termux.app.models.UserAction
 import com.termux.app.terminal.io.KeyboardShortcut
-import com.termux.shared.activities.ReportActivity
-import com.termux.shared.android.AndroidUtils
 import com.termux.shared.data.DataUtils
-import com.termux.shared.file.FileUtils
-import com.termux.shared.interact.MessageDialogUtils
 import com.termux.shared.interact.ShareUtils
 import com.termux.shared.logger.Logger
-import com.termux.shared.markdown.MarkdownUtils
-import com.termux.shared.models.ReportInfo
 import com.termux.shared.shell.ShellUtils
-import com.termux.shared.termux.TermuxBootstrap
-import com.termux.shared.termux.TermuxConstants
-import com.termux.shared.termux.TermuxUtils
 import com.termux.shared.termux.data.TermuxUrlUtils
 import com.termux.shared.termux.extrakeys.SpecialButton
 import com.termux.shared.termux.settings.properties.TermuxPropertyConstants
@@ -171,6 +160,14 @@ class TermuxTerminalViewClient(
     override fun copyModeChanged(copyMode: Boolean) {
         // The left drawer has been removed, so there is nothing to lock while
         // text selection (copy mode) is active.
+    }
+
+    override fun onSelectUrl() {
+        showUrlSelection()
+    }
+
+    override fun onShareTranscript() {
+        shareSessionTranscript()
     }
 
     @SuppressLint("RtlHardcoded")
@@ -545,76 +542,6 @@ class TermuxTerminalViewClient(
         }
 
         dialog.show()
-    }
-
-    fun reportIssueFromTranscript() {
-        val session = mActivity.currentSession ?: return
-
-        val transcriptText = ShellUtils.getTerminalSessionTranscriptText(session, false, true) ?: return
-
-        MessageDialogUtils.showMessage(
-            mActivity, "${TermuxConstants.TERMUX_APP_NAME} Report Issue",
-            mActivity.getString(R.string.msg_add_termux_debug_info),
-            mActivity.getString(com.termux.shared.R.string.action_yes),
-            { _, _ -> reportIssueFromTranscript(transcriptText, true) },
-            mActivity.getString(com.termux.shared.R.string.action_no),
-            { _, _ -> reportIssueFromTranscript(transcriptText, false) },
-            null
-        )
-    }
-
-    private fun reportIssueFromTranscript(transcriptText: String, addTermuxDebugInfo: Boolean) {
-        Logger.showToast(mActivity, mActivity.getString(R.string.msg_generating_report), true)
-
-        Thread {
-            val reportString = StringBuilder()
-
-            val title = "${TermuxConstants.TERMUX_APP_NAME} Report Issue"
-
-            reportString.append("## Transcript\n")
-            reportString.append("\n").append(MarkdownUtils.getMarkdownCodeForString(transcriptText, true))
-            reportString.append("\n##\n")
-
-            if (addTermuxDebugInfo) {
-                reportString.append("\n\n").append(
-                    TermuxUtils.getAppInfoMarkdownString(mActivity, TermuxUtils.AppInfoMode.TERMUX_AND_PLUGIN_PACKAGES)
-                )
-            } else {
-                reportString.append("\n\n").append(
-                    TermuxUtils.getAppInfoMarkdownString(mActivity, TermuxUtils.AppInfoMode.TERMUX_PACKAGE)
-                )
-            }
-
-            reportString.append("\n\n").append(AndroidUtils.getDeviceInfoMarkdownString(mActivity, true))
-
-            if (TermuxBootstrap.isAppPackageManagerAPT()) {
-                val termuxAptInfo = TermuxUtils.geAPTInfoMarkdownString(mActivity)
-                if (termuxAptInfo != null)
-                    reportString.append("\n\n").append(termuxAptInfo)
-            }
-
-            if (addTermuxDebugInfo) {
-                val termuxDebugInfo = TermuxUtils.getTermuxDebugMarkdownString(mActivity)
-                if (termuxDebugInfo != null)
-                    reportString.append("\n\n").append(termuxDebugInfo)
-            }
-
-            val userActionName = UserAction.REPORT_ISSUE_FROM_TRANSCRIPT.name
-
-            val reportInfo = ReportInfo(
-                userActionName,
-                TermuxConstants.TERMUX_APP.TERMUX_ACTIVITY_NAME, title
-            )
-            reportInfo.setReportString(reportString.toString())
-            reportInfo.setReportStringSuffix("\n\n" + TermuxUtils.getReportIssueMarkdownString(mActivity))
-            reportInfo.setReportSaveFileLabelAndPath(
-                userActionName,
-                Environment.getExternalStorageDirectory().toString() + "/" +
-                    FileUtils.sanitizeFileName("${TermuxConstants.TERMUX_APP_NAME}-$userActionName.log", true, true)
-            )
-
-            ReportActivity.startReportActivity(mActivity, reportInfo)
-        }.start()
     }
 
     fun doPaste() {
