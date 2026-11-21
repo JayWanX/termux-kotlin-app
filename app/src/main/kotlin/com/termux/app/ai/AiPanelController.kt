@@ -1,6 +1,7 @@
 package com.termux.app.ai
 
 import android.widget.FrameLayout
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -25,6 +26,8 @@ class AiPanelController(
     private val lifecycleOwner: LifecycleOwner,
     private val container: FrameLayout,
     private val terminal: TerminalControl,
+    /** True on narrow screens, where labels are abbreviated to fit the side panel. */
+    private val compact: Boolean = false,
 ) {
 
     companion object {
@@ -131,15 +134,18 @@ class AiPanelController(
                 androidx.compose.runtime.LaunchedEffect(Unit) {
                     terminal.state.collect { terminalState = it }
                 }
+                val panelState by current.state.collectAsState()
 
                 AiPanel(
-                    session = current,
+                    state = panelState,
                     terminalState = terminalState,
                     onSend = { text -> send(current, text) },
                     onStop = { stop() },
                     onConfirm = { approved -> current.answerConfirmation(approved) },
                     onReset = { current.reset() },
                     onClose = { hide() },
+                    onToggleSteps = { messageId -> current.toggleSteps(messageId) },
+                    compact = compact,
                 )
             }
         }

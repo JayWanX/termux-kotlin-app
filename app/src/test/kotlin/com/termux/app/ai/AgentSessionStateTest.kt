@@ -61,7 +61,7 @@ class AgentSessionStateTest {
         val session = AgentSession(
             config = AiConfigForTest.create(),
             loop = AgentLoop(
-                client = OpenAiClient(AiConfigForTest.create()),
+                streamingClient = StreamingChatClient(AiConfigForTest.create()),
                 registry = ToolRegistry(),
                 config = AiConfigForTest.create(),
             ),

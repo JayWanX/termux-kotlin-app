@@ -498,7 +498,7 @@ security-crypto = "1.1.0-alpha06" # androidx.security:security-crypto
 | 会话模板 | `app/.../terminal/SessionTemplates.kt` | P2-3，内置 3 个 + 用户自定义 |
 | 分层检查 | `scripts/check-layering.sh` | CI 三步静态校验 |
 
-**测试**：`termux-shared` 57 项 + `app` 154 项，共 **211 项全部通过**。
+**测试**：`termux-shared` 114 项 + `terminal-emulator` 290 项 + `app` 474 项，共 **878 项**（debug + release 两个变体各一份）全部通过。
 
 ### 8.2 与设计不同的地方
 
@@ -518,13 +518,67 @@ security-crypto = "1.1.0-alpha06" # androidx.security:security-crypto
 `terminal-emulator` 的 `ndk-build` 崩溃（exit `-1073741819`，访问冲突）。Kotlin 编译、KSP、Hilt、单元测试均正常。
 
 **③ 单元测试抓到一个真实安全 bug。**
-`ReadFileTool.resolveInsideHome` 原本用 `File(home, path)` 拼接，而 `File(parent, child)` 在 **child 为绝对路径时并不会总是丢弃 parent**（Windows 上会直接拼接）。结果是 `C:\...\home\` + `C:\...\evil.txt` 被拼成 home 内的合法路径，沙箱被绕过。已改为显式判断 `File(expanded).isAbsolute`。Android 上原本行为正确，但显式判断更稳妥。
+`ReadFileTool.resolveInsideHome` 原本用 `File(home, path)` 拼接，而 `File(parent, child)` 在 **child 为绝对路径时并不会总是丢弃 parent**（Windows 上会直接拼接）。结果是 `C:\...\home\` + `C:\...\evil.txt` 被拼成 home 内的合法路径，沙箱被绕过。已改为显式判断 `File(expanded).isAbsolute`。
+
+> **补充：这个修法后来被 ⑪ 推翻了一半。** 显式判断绝对性本身没错，但把它用在"先剥掉 `~` 再判断"的流程上是错的——剥掉 `~` 后的 `/docs` 在 POSIX 上就是绝对路径。正确的做法是先按前缀拼接（见 ⑪），绝对性判断只用于**从未经过 `~` 展开**的原始输入。
 
 **④ 测试环境依赖需要联网首拉。**
 `okhttp` 与 `security-crypto`（连带 `tink-android`）首次构建需联网下载，之后可 `--offline`。`org.json` 在纯 JVM 单测中是空桩，故相关测试改用 Robolectric。
 
 **⑤ 文件工具的测试抓到一个真实沙箱逃逸。**
 首版 `FileSandbox.resolve` 只依赖 `canonicalFile` 判断越界。实测发现 **Windows 上 `getCanonicalPath` 不解析符号链接**（同一路径在 Android/Linux 上会解析），于是 `<root>/link→/outside/secret` 被判定为在 root 内。已补 `assertNoEscapingSymlink`：沿祖先链检查 `Files.isSymbolicLink` + `toRealPath()`，任一环节指向 root 之外即拒绝。同时修了祖先检查在“目标就是 root 本身”时误拒的问题。
+
+**⑪ `~/xxx` 在真机上完全不可用（CI 才抓到）。**
+`resolve` 原本这样展开家目录：
+
+```kotlin
+val expanded = if (trimmed == "~") home.path else trimmed.removePrefix("~")
+val candidate = if (File(expanded).isAbsolute) File(expanded) else File(home, expanded)
+```
+
+把 `~` 去掉后剩 `/docs`。**在 POSIX 上 `/docs` 就是绝对路径**，于是 `~/docs` 被解析到文件系统根、再因越界被拒。Windows 不把前导 `/` 当作绝对路径，所以它在开发机上一直"通过"；只有 Linux CI 和 Android 会失败。
+
+后果不是测试问题而是**功能缺失**：`~/` 是文档里推荐的写法，助手实际只能用 `~` 本身和纯相对路径，任何 `~/子路径` 都被拒绝。
+
+修法：按前缀拼接，不再先剥前缀再重新判断绝对性。
+
+```kotlin
+val candidate = when {
+    trimmed == "~" -> home
+    trimmed.startsWith("~/") -> File(home, trimmed.removePrefix("~/"))
+    File(trimmed).isAbsolute -> File(trimmed)
+    else -> File(home, trimmed)
+}
+```
+
+同时新增 `TildeExpansionTest`：断言 `~/a/b.txt` 与 `a/b.txt` 解析到**同一个文件**、保持全部子路径段、且 `~/../../etc/passwd` 仍被拒。这类"在某平台恒真"的断言才是能跨平台抓住回归的写法——原来那条 `assertTrue(resolve("~/docs").path.startsWith(home.path))` 在 Windows 上恒真，等于没测。
+
+**为什么潜伏这么久**：两处 CI 配置叠在一起，让 Linux 上的测试从来没被真正执行过。
+
+1. `run_tests.yml` 的 trigger 写的是 `master` / `android-10`，而仓库分支是 `main` —— 这个 workflow **从未被触发过**，本次是 run #1。
+2. `coverage.yml` 在测试步骤上带 `continue-on-error: true`，所以即使测试真的失败，那个 job 依然显示绿色。它的 28 次运行全部"成功"，掩盖了同一个失败。
+
+两处都已修正：
+
+- trigger 加入 `main`。
+- 去掉测试步骤的 `continue-on-error`；覆盖率上传改用 `if: always()`，这样失败时仍保留覆盖率报告，但**失败本身不会再被吞掉**。这两件事本来就不冲突，`continue-on-error` 是被误用成了"顺便还能传报告"。
+- 新增 `scripts/check-workflows.py` 并接入 CI：任何 workflow 里出现 `continue-on-error` 就令构建失败。已验证把该字段加回去会让脚本退出码变 1 —— 否则这个坑迟早被重新踩。该脚本还会把 workflow 里引用的 Gradle 任务名和 build 脚本里声明的任务名对照，找不到的任务给出警告。
+- 新增失败自诊断：`run_tests.yml` 在测试失败时解析 JUnit XML，把**具体测试名与首行错误**打印到 Actions 摘要页，并上传 XML/HTML 报告。本次能定位到 `tilde with subpath expands` 靠的正是这个信息；在它之前，CI 只给出"There were failing tests"，只能靠猜。
+
+**⑫ `continue-on-error` 一去掉，暴露出第二个被掩盖的问题：项目里根本没有 JaCoCo。**
+
+`coverage.yml` 一直执行 `./gradlew testDebugUnitTest jacocoTestReport`，但**整个仓库没有任何 JaCoCo 配置**，`jacocoTestReport` 这个任务从未存在过。第一步报 `Task 'jacocoTestReport' not found` 并失败，`continue-on-error` 把它吞掉，后面两个上传步骤于是把**空目录**发了 28 次。也就是说，这个名为"Code Coverage"的 workflow 从来没有产出过一行覆盖率。
+
+修法是让它真的能跑，而不是删掉任务：
+
+- `app/build.gradle` 应用 `jacoco` 插件。
+- `testOptions.unitTests.all { }` 里开启 `jacoco.includeNoLocationClasses`，让单测运行时写出 `build/jacoco/testDebugUnitTest.exec`。不开启则报告无数据可读。
+- 手写注册 `jacocoTestReport`（`JacocoReport` 类型）：Android 插件不会为它自己的 variant 自动建报告任务，所以类目录直接指向 `tmp/kotlin-classes/debug` 与 `intermediates/javac/debug`。排除 `R`/`BuildConfig`/Hilt 与 Room 生成代码，以及 Robolectric 运行时合成的类——否则这些未测试的生成代码会把整体覆盖率压成噪声。
+- workflow 里改为 `:app:jacocoTestReport`（Gradle 本身能在根项目解析到模块任务，限定只是更明确）。
+
+实测结果（真实数据，非 0）：整体行覆盖 **11.5%**（1701/14806），`com.termux.app.ai` 包行覆盖 **65.7%**（1162/1769）——新增的助手代码被测试覆盖到了，而整个 app 因历史代码基数大而偏低，这是可以接受且此前不可见的基线。
+
+顺带确认了一个隐含假设：`jacocoTestReport` 报告落在 `app/build/reports/jacoco/jacocoTestReport/`，能被 workflow 里 `**/build/reports/jacoco/**/*.xml` 的模式匹配到，Codecov 的上传路径是对的。**如果当时图省事把任务删掉，这个 workflow 会显示成功，而覆盖率将永远为空。**
 
 **⑥ 确认粒度按操作类型分开。**
 原设计用单个 `confirmCommands` 同时管命令与文件编辑。这会让用户陷入两难：要么每次编辑都点确认（烦），要么为省事把关掉后连命令确认也没了。已拆成 `confirmCommands` 与 `confirmFileEdits`。
@@ -540,6 +594,36 @@ security-crypto = "1.1.0-alpha06" # androidx.security:security-crypto
 
 **⑩ 会话模板存在应用私有目录。**
 `filesDir/session-templates.json`，而不是 `~/.termux/`。模板是 App 的行为配置，不是终端内容；放进用户 home 会污染 `ls` 结果，也会在备份/同步时被当作数据带走。
+
+### 8.4 面板交互与观感（真机反馈驱动）
+
+真机试用后的四个问题，以及修法。共同点是：**这些缺陷在代码评审里看不出来，必须真的看屏幕**。因此本轮同时补了一套把面板渲染成 PNG 的测试（见下）。
+
+**① 右边缘滑动完全不触发。**
+原因有两层，缺一层都不生效：
+- **父布局的 `setOnTouchListener` 根本不会被调用。** `OnTouchListener` 只在「没有任何子 View 消费该事件」时才被父布局询问；而 `TerminalView` 的 `onTouchEvent` 无条件 `return true`，即吞掉每一次触摸。所以监听器形同不存在。
+- **手势导航会先截走边缘滑动。** Android 10 起，屏幕边缘约 20dp 内的滑动属于系统（返回手势），App 连事件都收不到。
+
+改法：
+- `TermuxActivityRootView` 重写 `dispatchTouchEvent`，提供 `TouchObserver` 钩子。它在任何子 View 之前看到事件，且只是**观察**不消费——若在 `ACTION_DOWN` 就返回 `true`，就必须当场知道方向（此时还不知道），并会把边缘条带的滚动/选字一并夺走。
+- 用 `setSystemGestureExclusionRects` 把右边缘条带声明为排除区。**平台两条限制都是静默失败**：排除区不得覆盖整条边、总面积不得超过屏幕 5%，违反任一条就被丢弃、边缘滑动退回成返回手势。两条限制写进 `GestureStrip.exclusionRect` 并有单测盯住。
+- 排除区**只在助手可用时占用**。占住边缘意味着该处的系统返回手势失效，这对没开助手的用户是纯粹的功能损失；`syncGestureExclusion` 每次 `onResume` 重新判断，设置里开关即时生效。
+
+**② 工具步骤展开后文字几乎不可见。**
+`colorScheme.outline` 是**分隔线颜色**（深色主题下 `0xFF262B31`），却被当成正文颜色用在步骤详情上——渲染出来是深灰压深灰。改用 `onSurfaceVariant` 的降透明度色。同时给步骤区做了分层：折叠态是一整行可点的浅色 chip，展开态每条步骤一张独立的浅底卡片 + 状态圆点（失败为 `error` 色），成功项右侧一个勾。这样「回复」和「诊断细节」在视觉上不再混在一起。
+
+**③ 按钮从文字改成图标。**
+Header 的 Stop / Clear / Close 与输入框的 Send 全部换成图标；Send 用 `FilledIconButton`，与终端工具栏已有的图标按钮一致。图标的 `contentDescription` 保留，无障碍不退化。
+
+**④ Assistant 菜单项挪到 Settings 之前。**
+助手是对「当前这个终端」做的动作，Settings 是离开终端；把常用的两项排在一起，而不是被一个导航项隔开。
+
+**顺带修掉的两个颜色缺陷：**
+- 面板原本只看系统深浅色（`isSystemInDarkTheme`），但 Termux 的主题是**独立设置**的。结果：App 锁深色 + 系统浅色 → 亮白面板盖在黑色终端上。新增 `AssistantTheme.isDark` 按 `NightMode` 判定，`TermuxTheme(darkTheme = ...)` 传入。
+- Markwon 的默认配色是按白底页面设计的：行内代码渲染成「深字 + 浅灰块」，深色面板里像一道高亮涂痕。改为通过 `AbstractMarkwonPlugin.configureTheme` 按当前配色重建 `Markwon` 实例（仅主题切换时重建，不是每帧）。
+
+**⑤ 新增：把面板渲染成 PNG 的测试。**
+`AiPanelRenderTest` 用 Robolectric `GraphicsMode.NATIVE` 真实绘制面板，导出 `app/build/panel-render/*.png`，并断言画面里不同颜色数 > 8（面板「组成了但没画出来」是这次踩过的坑，纯逻辑测试抓不到）。CI 把这些图作为 artifact 上传，改完样式可以直接看，不必等真机。上面②的对比度问题，就是这个测试第一次跑出来时从图里看见的。
 
 ---
 

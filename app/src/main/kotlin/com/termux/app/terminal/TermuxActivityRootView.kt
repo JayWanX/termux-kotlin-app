@@ -2,7 +2,9 @@ package com.termux.app.terminal
 
 import android.content.Context
 import android.graphics.Rect
+import android.os.Build
 import android.util.AttributeSet
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewTreeObserver
@@ -76,6 +78,81 @@ open class TermuxActivityRootView @JvmOverloads constructor(
 
     /** Log root view events. */
     private var ROOT_VIEW_LOGGING_ENABLED = false
+
+    /**
+     * An optional observer that sees touch events before they reach the terminal.
+     *
+     * The root view has to offer this because it is the first view in the hierarchy to see every event:
+     * a listener set on an inner [ViewGroup] is never consulted while a child consumes the touch, and
+     * the terminal consumes all of them.
+     *
+     * The observer cannot consume anything, by design. Seeing `ACTION_DOWN` before the drag direction is
+     * known makes it impossible to decide whether to claim the touch, and claiming it anyway would take
+     * the whole edge strip away from scrolling and text selection, which is the terminal's primary job.
+     *
+     * Deliberately generic: this class knows nothing about what the observer does.
+     */
+    interface TouchObserver {
+        fun onTouch(event: MotionEvent, rootWidth: Int)
+    }
+
+    /** Installed by the activity; null means nothing is watching. */
+    @JvmField
+    var touchObserver: TouchObserver? = null
+
+    /**
+     * Width in pixels of the right-hand strip the activity wants to keep for its own gestures.
+     *
+     * On Android 10 and later, a swipe starting within about 20dp of a screen edge belongs to the
+     * system: it becomes Back, and the app never sees the movement at all. Declaring the strip as a
+     * gesture exclusion is the only way an in-app edge gesture can work while that navigation mode is
+     * active.
+     *
+     * Setting this to zero releases the strip immediately, so an app that does not use the gesture
+     * gives the edge back to the system instead of quietly making Back unreliable there.
+     */
+    var gestureExclusionWidth: Int = 0
+        set(value) {
+            if (field == value) return
+            field = value
+            updateGestureExclusion()
+        }
+
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        touchObserver?.onTouch(ev, width)
+        return super.dispatchTouchEvent(ev)
+    }
+
+    override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
+        super.onLayout(changed, l, t, r, b)
+        updateGestureExclusion()
+    }
+
+    /**
+     * Reserves the right-edge strip for this app's own gestures.
+     *
+     * Both platform limits — band height and total claimed area — are applied by [GestureStrip], because
+     * exceeding either is not an error the app can observe: the system drops the exclusion and the edge
+     * swipe silently becomes a Back gesture again.
+     */
+    private fun updateGestureExclusion() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
+
+        val band = GestureStrip.exclusionRect(
+            widthPx = width,
+            heightPx = height,
+            stripWidthPx = gestureExclusionWidth,
+            density = resources.displayMetrics.density,
+        )
+        if (band == null) {
+            if (systemGestureExclusionRects.isNotEmpty()) systemGestureExclusionRects = emptyList()
+            return
+        }
+
+        val rect = Rect(band.left, band.top, band.right, band.bottom)
+        if (systemGestureExclusionRects.size == 1 && systemGestureExclusionRects[0] == rect) return
+        systemGestureExclusionRects = listOf(rect)
+    }
 
     fun setActivity(activity: TermuxActivity) {
         mActivity = activity

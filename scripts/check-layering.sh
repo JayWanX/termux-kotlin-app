@@ -10,6 +10,7 @@
 #   1. Only TermuxActivity may import the ai package from outside it.
 #   2. The shared/emulator/view modules must not import com.termux.app at all.
 #   3. The core terminal state types must not reference any assistant/LLM type.
+#   4. The assistant may not touch the terminal bypassing TerminalControl.
 #
 # Only real `import` statements are considered, so prose in comments cannot trip the checks.
 #
@@ -72,6 +73,27 @@ if [ -n "$state_leaks" ]; then
     printf '  %s\n' "$state_leaks" >&2
 else
     note "ok: terminal state types are free of assistant dependencies"
+fi
+
+# ---------------------------------------------------------------------------
+# Rule 4: the assistant goes through TerminalControl, never around it.
+#
+# The session and emulator classes are the terminal's internals. An assistant that reaches into them
+# would break the moment the terminal's rendering changes, and would bypass the state machine that
+# makes command results trustworthy.
+# ---------------------------------------------------------------------------
+bypass='^import com\.termux\.(terminal|view)\.'
+ai_bypass=$(
+    grep -rnE "$bypass" app/src/main/kotlin/com/termux/app/ai \
+        --include='*.kt' 2>/dev/null \
+        || true
+)
+
+if [ -n "$ai_bypass" ]; then
+    err "the assistant must use TerminalControl, not the terminal internals:"
+    printf '  %s\n' "$ai_bypass" >&2
+else
+    note "ok: the assistant only reaches the terminal through TerminalControl"
 fi
 
 if [ "$fail" -ne 0 ]; then

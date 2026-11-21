@@ -13,10 +13,38 @@ data class TurnMessage(
     val role: String,
     val text: String,
     val steps: List<TurnStep> = emptyList(),
-)
+    /**
+     * Whether the tool steps for this message are expanded.
+     *
+     * Collapsed by default: tool steps are diagnostic detail, not the answer. Showing a dozen command
+     * lines at full size buries the reply the user actually asked for.
+     */
+    val stepsExpanded: Boolean = false,
+) {
+    /** A one-line summary of the steps, shown while collapsed. */
+    val stepsSummary: String
+        get() {
+            if (steps.isEmpty()) return ""
+            val finished = steps.count { it.finished }
+            val failed = steps.count { it.finished && it.detail.startsWith("Error", ignoreCase = true) }
+            return buildString {
+                append(if (finished < steps.size) "Working" else "Done")
+                append(" · ")
+                append(steps.size)
+                append(if (steps.size == 1) " step" else " steps")
+                if (failed > 0) append(" · ").append(failed).append(" failed")
+            }
+        }
+}
 
 /** A tool step shown under a message. */
-data class TurnStep(val label: String, val detail: String, val finished: Boolean = false)
+data class TurnStep(
+    val label: String,
+    val detail: String,
+    val finished: Boolean = false,
+    /** Whether the step produced an error, so the collapsed summary can flag it. */
+    val isError: Boolean = false,
+)
 
 /** The panel's observable state. */
 data class SessionState(
@@ -69,6 +97,20 @@ class AgentSession(
         pendingConfirmation?.complete(approved)
         pendingConfirmation = null
         _state.value = _state.value.copy(pendingConfirmation = null)
+    }
+
+    /** Expands or collapses the tool steps of one message. */
+    fun setStepsExpanded(messageId: String, expanded: Boolean) {
+        val messages = _state.value.messages.map { message ->
+            if (message.id == messageId) message.copy(stepsExpanded = expanded) else message
+        }
+        _state.value = _state.value.copy(messages = messages)
+    }
+
+    /** Toggles the tool steps of one message. */
+    fun toggleSteps(messageId: String) {
+        val message = _state.value.messages.find { it.id == messageId } ?: return
+        setStepsExpanded(messageId, !message.stepsExpanded)
     }
 
     /**
@@ -140,13 +182,25 @@ class AgentSession(
             is AgentEvent.ToolFinished -> {
                 val message = current.messages.find { it.id == assistantId } ?: return
                 val steps = message.steps.toMutableList()
+                val isError = event.summary.startsWith("Error", ignoreCase = true) ||
+                    event.summary.startsWith("Refused", ignoreCase = true)
                 val index = steps.indexOfLast { it.label == event.label && !it.finished }
                 if (index >= 0) {
-                    steps[index] = steps[index].copy(detail = event.summary, finished = true)
+                    steps[index] = steps[index].copy(
+                        detail = event.summary,
+                        finished = true,
+                        isError = isError,
+                    )
                 } else {
-                    steps += TurnStep(event.label, event.summary, finished = true)
+                    steps += TurnStep(event.label, event.summary, finished = true, isError = isError)
                 }
                 replaceMessage(message.copy(steps = steps))
+            }
+
+            is AgentEvent.TextDelta -> {
+                // Append incrementally so the panel shows the reply as it is generated.
+                val message = current.messages.find { it.id == assistantId } ?: return
+                replaceMessage(message.copy(text = message.text + event.text))
             }
 
             is AgentEvent.ConfirmationRequired -> {
@@ -155,7 +209,11 @@ class AgentSession(
 
             is AgentEvent.Final -> {
                 val message = current.messages.find { it.id == assistantId } ?: return
-                replaceMessage(message.copy(text = event.text))
+                // The streamed text is already present; only overwrite when the final text differs,
+                // which happens for locally generated notices such as the round-limit message.
+                if (message.text.isBlank() || message.text != event.text) {
+                    replaceMessage(message.copy(text = event.text))
+                }
             }
         }
     }
