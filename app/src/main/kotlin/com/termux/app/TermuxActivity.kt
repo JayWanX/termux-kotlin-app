@@ -460,8 +460,6 @@ class TermuxActivity : AppCompatActivity(), ServiceConnection {
 
         val autoFillEnabled = mTerminalView.isAutoFillEnabled
 
-        menu.add(Menu.NONE, CONTEXT_MENU_SELECT_URL_ID, Menu.NONE, R.string.action_select_url)
-        menu.add(Menu.NONE, CONTEXT_MENU_SHARE_TRANSCRIPT_ID, Menu.NONE, R.string.action_share_transcript)
         if (!DataUtils.isNullOrEmpty(mTerminalView.storedSelectedText)) {
             menu.add(Menu.NONE, CONTEXT_MENU_SHARE_SELECTED_TEXT, Menu.NONE, R.string.action_share_selected_text)
         }
@@ -494,14 +492,6 @@ class TermuxActivity : AppCompatActivity(), ServiceConnection {
         val session = currentSession
 
         return when (item.itemId) {
-            CONTEXT_MENU_SELECT_URL_ID -> {
-                mTermuxTerminalViewClient?.showUrlSelection()
-                true
-            }
-            CONTEXT_MENU_SHARE_TRANSCRIPT_ID -> {
-                mTermuxTerminalViewClient?.shareSessionTranscript()
-                true
-            }
             CONTEXT_MENU_SHARE_SELECTED_TEXT -> {
                 mTermuxTerminalViewClient?.shareSelectedText()
                 true
@@ -784,8 +774,6 @@ class TermuxActivity : AppCompatActivity(), ServiceConnection {
     }
 
     companion object {
-        private const val CONTEXT_MENU_SELECT_URL_ID = 0
-        private const val CONTEXT_MENU_SHARE_TRANSCRIPT_ID = 1
         private const val CONTEXT_MENU_SHARE_SELECTED_TEXT = 10
         private const val CONTEXT_MENU_AUTOFILL_USERNAME = 11
         private const val CONTEXT_MENU_AUTOFILL_PASSWORD = 2
