@@ -80,7 +80,6 @@
     <string name="action_kill_process">Kill process (%d)</string>
     <string name="title_confirm_kill_process">Really kill this session?</string>
 
-    <string name="action_style_terminal">Style</string>
     <string name="action_toggle_keep_screen_on">Keep screen on</string>
     <string name="action_open_help">Help</string>
     <string name="action_open_settings">Settings</string>
@@ -195,6 +194,10 @@
         <string name="termux_terminal_view_preferences_title">Terminal View</string>
         <string name="termux_terminal_view_preferences_summary">Preferences for terminal view</string>
 
+        <!-- Styling Preferences -->
+        <string name="styling_preferences_title">Style</string>
+        <string name="styling_preferences_summary">Terminal colors, fonts and appearance</string>
+
             <!-- View Category -->
             <string name="termux_terminal_view_view_header">View</string>
 
@@ -233,8 +236,5 @@
 
     <!-- About Preference -->
     <string name="about_preference_title">About</string>
-
-    <!-- Donate Preference -->
-    <string name="donate_preference_title">Donate</string>
 
 </resources>

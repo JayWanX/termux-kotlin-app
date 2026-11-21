@@ -1,11 +1,15 @@
 package com.termux.app.fragments.settings
 
 import android.content.Context
+import android.content.Intent
 import android.os.Bundle
 import androidx.annotation.Keep
+import androidx.preference.Preference
 import androidx.preference.PreferenceDataStore
 import androidx.preference.PreferenceFragmentCompat
 import com.termux.R
+import com.termux.app.styling.StylingActivity
+import com.termux.shared.activity.ActivityUtils
 import com.termux.shared.termux.settings.preferences.TermuxAppSharedPreferences
 
 @Keep
@@ -18,6 +22,11 @@ class TermuxPreferencesFragment : PreferenceFragmentCompat() {
         preferenceManager.preferenceDataStore = TermuxPreferencesDataStore.getInstance(context)
 
         setPreferencesFromResource(R.xml.termux_preferences, rootKey)
+
+        findPreference<Preference>("styling")?.setOnPreferenceClickListener {
+            ActivityUtils.startActivity(context, Intent(context, StylingActivity::class.java))
+            true
+        }
     }
 }
 

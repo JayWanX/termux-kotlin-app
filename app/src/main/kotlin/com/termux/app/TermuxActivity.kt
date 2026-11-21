@@ -474,7 +474,6 @@ class TermuxActivity : AppCompatActivity(), ServiceConnection {
             Menu.NONE, CONTEXT_MENU_KILL_PROCESS_ID, Menu.NONE,
             resources.getString(R.string.action_kill_process, currentSession.getPid())
         ).isEnabled = currentSession.isRunning
-        menu.add(Menu.NONE, CONTEXT_MENU_STYLING_ID, Menu.NONE, R.string.action_style_terminal)
         menu.add(Menu.NONE, CONTEXT_MENU_TOGGLE_KEEP_SCREEN_ON, Menu.NONE, R.string.action_toggle_keep_screen_on)
             .isCheckable = true
         menu.findItem(CONTEXT_MENU_TOGGLE_KEEP_SCREEN_ON)?.isChecked = mPreferences?.shouldKeepScreenOn() == true
@@ -510,10 +509,6 @@ class TermuxActivity : AppCompatActivity(), ServiceConnection {
             }
             CONTEXT_MENU_KILL_PROCESS_ID -> {
                 showKillSessionDialog(session)
-                true
-            }
-            CONTEXT_MENU_STYLING_ID -> {
-                showStylingDialog()
                 true
             }
             CONTEXT_MENU_TOGGLE_KEEP_SCREEN_ON -> {
@@ -557,12 +552,6 @@ class TermuxActivity : AppCompatActivity(), ServiceConnection {
             showToast(resources.getString(R.string.msg_terminal_reset), true)
             mTermuxTerminalSessionActivityClient?.onResetTerminalSession()
         }
-    }
-
-    private fun showStylingDialog() {
-        // Launch built-in styling activity (integrated in v2.0.5)
-        val stylingIntent = Intent(this, com.termux.app.styling.StylingActivity::class.java)
-        startActivity(stylingIntent)
     }
 
     private fun toggleKeepScreenOn() {
@@ -779,7 +768,6 @@ class TermuxActivity : AppCompatActivity(), ServiceConnection {
         private const val CONTEXT_MENU_AUTOFILL_PASSWORD = 2
         private const val CONTEXT_MENU_RESET_TERMINAL_ID = 3
         private const val CONTEXT_MENU_KILL_PROCESS_ID = 4
-        private const val CONTEXT_MENU_STYLING_ID = 5
         private const val CONTEXT_MENU_TOGGLE_KEEP_SCREEN_ON = 6
         private const val CONTEXT_MENU_HELP_ID = 7
         private const val CONTEXT_MENU_SETTINGS_ID = 8

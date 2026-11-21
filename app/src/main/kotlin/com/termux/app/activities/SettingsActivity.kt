@@ -11,8 +11,6 @@ import com.termux.shared.activities.ReportActivity
 import com.termux.shared.file.FileUtils
 import com.termux.shared.models.ReportInfo
 import com.termux.app.models.UserAction
-import com.termux.shared.interact.ShareUtils
-import com.termux.shared.android.PackageUtils
 import com.termux.shared.termux.settings.preferences.TermuxAPIAppSharedPreferences
 import com.termux.shared.termux.settings.preferences.TermuxFloatAppSharedPreferences
 import com.termux.shared.termux.settings.preferences.TermuxTaskerAppSharedPreferences
@@ -60,7 +58,6 @@ class SettingsActivity : AppCompatActivity() {
                 configureTermuxTaskerPreference(context)
                 configureTermuxWidgetPreference(context)
                 configureAboutPreference(context)
-                configureDonatePreference(context)
             }.start()
         }
 
@@ -127,30 +124,6 @@ class SettingsActivity : AppCompatActivity() {
                         ReportActivity.startReportActivity(context, reportInfo)
                     }.start()
 
-                    true
-                }
-            }
-        }
-
-        private fun configureDonatePreference(context: Context) {
-            val donatePreference = findPreference<Preference>("donate")
-            if (donatePreference != null) {
-                val signingCertificateSHA256Digest = PackageUtils.getSigningCertificateSHA256DigestForPackage(context)
-                if (signingCertificateSHA256Digest != null) {
-                    // If APK is a Google Playstore release, then do not show the donation link
-                    // since Termux isn't exempted from the playstore policy donation links restriction
-                    // Check Fund solicitations: https://pay.google.com/intl/en_in/about/policy/
-                    val apkRelease = TermuxUtils.getAPKRelease(signingCertificateSHA256Digest)
-                    if (apkRelease == null || apkRelease == TermuxConstants.APK_RELEASE_GOOGLE_PLAYSTORE_SIGNING_CERTIFICATE_SHA256_DIGEST) {
-                        donatePreference.isVisible = false
-                        return
-                    } else {
-                        donatePreference.isVisible = true
-                    }
-                }
-
-                donatePreference.setOnPreferenceClickListener {
-                    ShareUtils.openUrl(context, TermuxConstants.TERMUX_DONATE_URL)
                     true
                 }
             }
