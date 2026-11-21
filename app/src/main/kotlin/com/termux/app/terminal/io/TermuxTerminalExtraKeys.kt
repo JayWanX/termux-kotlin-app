@@ -105,6 +105,14 @@ class TermuxTerminalExtraKeys(
                 val terminalView = mTermuxTerminalViewClient?.activity?.terminalView
                 terminalView?.mEmulator?.toggleAutoScrollDisabled()
             }
+            "MORE" -> {
+                // Show the terminal context menu (settings, styling, help, etc.)
+                mActivity.terminalView.showContextMenu()
+            }
+            "SESSIONS" -> {
+                // Show the session list dialog for quick session switching
+                mTermuxTerminalSessionActivityClient?.showSessionListDialog()
+            }
             else -> {
                 super.onTerminalExtraKeyButtonClick(view, key, ctrlDown, altDown, shiftDown, fnDown)
             }

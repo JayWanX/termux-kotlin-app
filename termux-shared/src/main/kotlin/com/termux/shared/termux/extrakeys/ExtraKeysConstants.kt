@@ -75,6 +75,8 @@ object ExtraKeysConstants {
             put("KEYBOARD", "⌨")
             put("PASTE", "⎘")
             put("SCROLL", "⇳")
+            put("MORE", "⋮")
+            put("SESSIONS", "⇄")
         }
 
         @JvmField

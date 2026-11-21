@@ -6,6 +6,7 @@ import android.graphics.Typeface
 import android.media.AudioAttributes
 import android.media.SoundPool
 import android.text.TextUtils
+import android.view.Gravity
 import android.widget.ListView
 import com.termux.R
 import com.termux.app.TermuxActivity
@@ -422,6 +423,51 @@ class TermuxTerminalSessionActivityClient(private val mActivity: TermuxActivity)
                 session.emulator!!.mColors.mCurrentColors[TextStyle.COLOR_INDEX_BACKGROUND]
             )
         }
+    }
+
+    /**
+     * Show a dialog listing all running sessions so the user can switch between them
+     * without opening the drawer.
+     */
+    fun showSessionListDialog() {
+        val service = mActivity.termuxService ?: return
+
+        val sessions = ArrayList<String>()
+        val sessionCount = service.termuxSessionsSize
+        for (i in 0 until sessionCount) {
+            val termuxSession = service.getTermuxSession(i) ?: continue
+            val terminalSession = termuxSession.terminalSession
+            // Label format matches "[1] <name>" style used by the session toasts
+            val label = mutableListOf<String>()
+            val name = terminalSession.mSessionName
+            label.add(if (TextUtils.isEmpty(name)) "Session [${i + 1}]" else "$name [${i + 1}]")
+            val processTitle = terminalSession.title
+            if (!processTitle.isNullOrEmpty() && processTitle != name) {
+                label.add(processTitle)
+            }
+            sessions.add(label.joinToString(" "))
+        }
+
+        val currentIndex = service.getIndexOfSession(mActivity.currentSession)
+
+        AlertDialog.Builder(mActivity)
+            .setTitle(R.string.title_session_list)
+            .setSingleChoiceItems(
+                sessions.toTypedArray(), currentIndex
+            ) { dialog, which ->
+                switchToSession(which)
+                dialog.dismiss()
+                mActivity.drawer.closeDrawers()
+            }
+            .setNeutralButton(R.string.action_session_list_more) { _, _ ->
+                // Open the drawer for full session management (rename/kill via long press)
+                mActivity.drawer.openDrawer(Gravity.LEFT)
+            }
+            .setNegativeButton(R.string.action_new_session) { _, _ ->
+                addNewSession(false, null)
+            }
+            .setPositiveButton(R.string.action_session_list_close, null)
+            .show()
     }
 
     companion object {

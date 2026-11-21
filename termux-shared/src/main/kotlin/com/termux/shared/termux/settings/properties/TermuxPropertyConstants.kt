@@ -272,7 +272,7 @@ object TermuxPropertyConstants {
 
     /** Defines the key for extra keys */
     const val KEY_EXTRA_KEYS = "extra-keys"
-    const val DEFAULT_IVALUE_EXTRA_KEYS = "[['ESC','/',{key: '-', popup: '|'},'HOME','UP','END','PGUP'], ['TAB','CTRL','ALT','LEFT','DOWN','RIGHT','PGDN']]"
+    const val DEFAULT_IVALUE_EXTRA_KEYS = "[['ESC','/',{key: '-', popup: '|'},'HOME','UP','END','PGUP','MORE'], ['TAB','CTRL','ALT','LEFT','DOWN','RIGHT','PGDN','SESSIONS']]"
 
     /** Defines the key for extra keys style */
     const val KEY_EXTRA_KEYS_STYLE = "extra-keys-style"
