@@ -1,6 +1,8 @@
 package com.termux.app.ui.compose.docs
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -9,15 +11,19 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -30,6 +36,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
 /**
@@ -50,6 +57,7 @@ fun CommandDocsScreen(
     var query by remember { mutableStateOf("") }
     var selected by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(true) }
+    val listState = rememberLazyListState()
 
     LaunchedEffect(Unit) {
         val loaded = withContext(Dispatchers.IO) {
@@ -65,40 +73,48 @@ fun CommandDocsScreen(
         loading = false
     }
 
-    val visible = remember(query, allCommands) {
+    val visible = remember(query, allCommands, summaries) {
         if (query.isBlank()) {
             allCommands
         } else {
             val lower = query.trim().lowercase()
-            val result = ArrayList<String>()
+            val byName = ArrayList<String>()
+            val bySummary = ArrayList<String>()
             for (command in allCommands) {
-                if (command.lowercase().contains(lower)) result.add(command)
-            }
-            if (result.isEmpty()) {
-                for (command in allCommands) {
+                if (command.lowercase().contains(lower)) {
+                    byName.add(command)
+                } else {
                     val summary = summaries[command]
                     if (summary != null && summary.lowercase().contains(lower)) {
-                        result.add(command)
+                        bySummary.add(command)
                     }
                 }
             }
-            result
+            byName.addAll(bySummary)
+            byName
         }
     }
 
     val current = selected
     if (current == null) {
+        // Back from the list exits the screen entirely.
+        BackHandler { onBack() }
         CommandListContent(
             commands = visible,
             summaries = summaries,
             query = query,
             loading = loading,
+            listState = listState,
             onQueryChange = { query = it },
-            onSelect = { selected = it },
+            onSelect = {
+                selected = it
+            },
             onOpenWiki = onOpenWiki,
             onBack = onBack
         )
     } else {
+        // Back from a detail returns to the list instead of leaving the screen.
+        BackHandler { selected = null }
         CommandDetailContent(
             command = current,
             repository = repository,
@@ -114,6 +130,7 @@ private fun CommandListContent(
     summaries: Map<String, String>,
     query: String,
     loading: Boolean,
+    listState: androidx.compose.foundation.lazy.LazyListState,
     onQueryChange: (String) -> Unit,
     onSelect: (String) -> Unit,
     onOpenWiki: () -> Unit,
@@ -149,7 +166,7 @@ private fun CommandListContent(
                 onValueChange = onQueryChange,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
+                    .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 8.dp),
                 placeholder = { Text("Search commands") },
                 leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                 trailingIcon = {
@@ -165,6 +182,15 @@ private fun CommandListContent(
                 keyboardActions = KeyboardActions(onSearch = { })
             )
 
+            if (!loading && commands.isNotEmpty()) {
+                Text(
+                    text = "${commands.size} commands",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 20.dp, bottom = 6.dp)
+                )
+            }
+
             if (loading) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator()
@@ -178,14 +204,17 @@ private fun CommandListContent(
                     )
                 }
             } else {
-                LazyColumn(modifier = Modifier.fillMaxSize()) {
+                LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
                     items(commands) { command ->
                         CommandRow(
                             command = command,
                             summary = summaries[command] ?: "",
                             onClick = { onSelect(command) }
                         )
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                        HorizontalDivider(
+                            color = MaterialTheme.colorScheme.outlineVariant,
+                            thickness = 0.5.dp
+                        )
                     }
                 }
             }
@@ -203,15 +232,37 @@ private fun CommandRow(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 14.dp),
+            .padding(start = 20.dp, end = 20.dp, top = 13.dp, bottom = 13.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        Box(
+            modifier = Modifier
+                .width(36.dp)
+                .height(36.dp)
+                .background(
+                    MaterialTheme.colorScheme.surfaceVariant,
+                    RoundedCornerShape(10.dp)
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = command.take(2),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold
+            )
+        }
+
+        Spacer(modifier = Modifier.width(14.dp))
+
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = command,
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurface
+                color = MaterialTheme.colorScheme.onSurface,
+                fontFamily = FontFamily.Monospace
             )
             if (summary.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(2.dp))
@@ -249,7 +300,13 @@ private fun CommandDetailContent(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(command, fontWeight = FontWeight.SemiBold) },
+                title = {
+                    Text(
+                        text = command,
+                        fontWeight = FontWeight.SemiBold,
+                        fontFamily = FontFamily.Monospace
+                    )
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -278,13 +335,18 @@ private fun CommandDetailContent(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 32.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    items(blocks) { block ->
-                        MarkdownBlock(block)
+                // SelectionContainer makes the whole document selectable so the
+                // text can be copied with a long press.
+                SelectionContainer {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(
+                            start = 16.dp, end = 16.dp, top = 8.dp, bottom = 40.dp
+                        )
+                    ) {
+                        items(blocks) { block ->
+                            MarkdownBlock(block)
+                        }
                     }
                 }
             }
@@ -295,107 +357,169 @@ private fun CommandDetailContent(
 @Composable
 private fun MarkdownBlock(block: MdBlock) {
     when (block) {
-        is MdBlock.Heading -> {
-            val style: TextStyle = when (block.level) {
-                1 -> MaterialTheme.typography.headlineSmall
-                2 -> MaterialTheme.typography.titleLarge
-                3 -> MaterialTheme.typography.titleMedium
-                else -> MaterialTheme.typography.titleSmall
-            }
-            Column {
-                if (block.level <= 2) Spacer(modifier = Modifier.height(8.dp))
-                MarkdownInline(block.text, style, MaterialTheme.colorScheme.onSurface)
-            }
-        }
+        is MdBlock.Heading -> HeadingBlock(block)
+        is MdBlock.Paragraph -> Text(
+            text = inlineText(block.text),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+            lineHeight = 22.sp
+        )
 
-        is MdBlock.Paragraph -> {
-            MarkdownInline(
-                block.text,
-                MaterialTheme.typography.bodyMedium,
-                MaterialTheme.colorScheme.onSurface
-            )
-        }
+        is MdBlock.CodeBlock -> CodeBlockView(block.code)
+        is MdBlock.BulletItem -> ListItemView(block.indent, "\u2022", block.text)
+        is MdBlock.NumberedItem -> ListItemView(block.indent, "${block.number}.", block.text)
+        is MdBlock.Quote -> QuoteView(block.text)
+        else -> HorizontalDivider(
+            modifier = Modifier.padding(vertical = 12.dp),
+            color = MaterialTheme.colorScheme.outlineVariant
+        )
+    }
+}
 
-        is MdBlock.CodeBlock -> {
+@Composable
+private fun HeadingBlock(block: MdBlock.Heading) {
+    val style: TextStyle = when (block.level) {
+        1 -> MaterialTheme.typography.headlineMedium
+        2 -> MaterialTheme.typography.titleLarge
+        3 -> MaterialTheme.typography.titleMedium
+        else -> MaterialTheme.typography.titleSmall
+    }
+    Column(modifier = Modifier.padding(top = if (block.level <= 2) 20.dp else 14.dp, bottom = 6.dp)) {
+        Text(
+            text = inlineText(block.text),
+            style = style,
+            color = MaterialTheme.colorScheme.onSurface,
+            fontWeight = FontWeight.Bold
+        )
+        if (block.level == 1) {
+            Spacer(modifier = Modifier.height(10.dp))
             Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(10.dp))
-                    .padding(start = 12.dp, end = 12.dp, top = 10.dp, bottom = 10.dp)
-            ) {
-                Text(
-                    text = block.code,
-                    style = MaterialTheme.typography.bodySmall.copy(
-                        fontFamily = FontFamily.Monospace,
-                        lineHeight = 18.sp
-                    ),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-
-        is MdBlock.BulletItem -> {
-            Row(modifier = Modifier.padding(start = (block.indent * 12).dp)) {
-                Text("•", color = MaterialTheme.colorScheme.primary)
-                Spacer(modifier = Modifier.width(8.dp))
-                MarkdownInline(
-                    block.text,
-                    MaterialTheme.typography.bodyMedium,
-                    MaterialTheme.colorScheme.onSurface
-                )
-            }
-        }
-
-        is MdBlock.NumberedItem -> {
-            Row(modifier = Modifier.padding(start = (block.indent * 12).dp)) {
-                Text(
-                    text = "${block.number}.",
-                    color = MaterialTheme.colorScheme.primary,
-                    style = MaterialTheme.typography.bodyMedium
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                MarkdownInline(
-                    block.text,
-                    MaterialTheme.typography.bodyMedium,
-                    MaterialTheme.colorScheme.onSurface
-                )
-            }
-        }
-
-        is MdBlock.Quote -> {
-            Row(modifier = Modifier.fillMaxWidth()) {
-                Box(
-                    modifier = Modifier
-                        .width(3.dp)
-                        .height(20.dp)
-                        .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(2.dp))
-                )
-                Spacer(modifier = Modifier.width(10.dp))
-                MarkdownInline(
-                    block.text,
-                    MaterialTheme.typography.bodyMedium,
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-
-        else -> {
-            HorizontalDivider(
-                modifier = Modifier.padding(top = 8.dp, bottom = 8.dp),
-                color = MaterialTheme.colorScheme.outlineVariant
+                    .width(44.dp)
+                    .height(3.dp)
+                    .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(2.dp))
             )
         }
     }
 }
 
 @Composable
-private fun MarkdownInline(
-    text: String,
-    style: TextStyle,
-    color: Color
-) {
+private fun CodeBlockView(code: String) {
+    val clipboard = LocalClipboardManager.current
+    var copied by remember { mutableStateOf(false) }
+
+    // Reset the "copied" hint after a moment.
+    LaunchedEffect(copied) {
+        if (copied) {
+            delay(1500)
+            copied = false
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp)
+            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp))
+            .border(
+                1.dp,
+                MaterialTheme.colorScheme.outlineVariant,
+                RoundedCornerShape(12.dp)
+            )
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 14.dp, end = 6.dp, top = 4.dp),
+            horizontalArrangement = Arrangement.End,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = if (copied) "Copied" else "",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            IconButton(
+                onClick = {
+                    clipboard.setText(AnnotatedString(code))
+                    copied = true
+                },
+                modifier = Modifier.size(32.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.ContentCopy,
+                    contentDescription = "Copy code",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+        }
+
+        Text(
+            text = code,
+            style = MaterialTheme.typography.bodySmall.copy(
+                fontFamily = FontFamily.Monospace,
+                lineHeight = 19.sp
+            ),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(start = 14.dp, end = 14.dp, top = 2.dp, bottom = 12.dp)
+        )
+    }
+}
+
+@Composable
+private fun ListItemView(indent: Int, marker: String, text: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = (indent * 14).dp, top = 3.dp, bottom = 3.dp)
+    ) {
+        Text(
+            text = marker,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.primary,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.width(24.dp)
+        )
+        Text(
+            text = inlineText(text),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+            lineHeight = 22.sp,
+            modifier = Modifier.weight(1f)
+        )
+    }
+}
+
+@Composable
+private fun QuoteView(text: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp),
+        verticalAlignment = Alignment.Top
+    ) {
+        Box(
+            modifier = Modifier
+                .width(3.dp)
+                .height(20.dp)
+                .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(2.dp))
+        )
+        Spacer(modifier = Modifier.width(12.dp))
+        Text(
+            text = inlineText(text),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontStyle = FontStyle.Italic
+        )
+    }
+}
+
+@Composable
+private fun inlineText(text: String): androidx.compose.ui.text.AnnotatedString {
     val spans = remember(text) { MarkdownParser.parseInline(text) }
-    val annotated = buildAnnotatedString {
+    return buildAnnotatedString {
         for (span in spans) {
             when (span) {
                 is MdSpan.Normal -> append(span.text)
@@ -408,16 +532,17 @@ private fun MarkdownInline(
                 is MdSpan.Code -> withStyle(
                     SpanStyle(
                         fontFamily = FontFamily.Monospace,
-                        background = Color(0x1A888888)
+                        background = Color(0x22888888)
                     )
                 ) {
                     append(span.text)
                 }
-                is MdSpan.Link -> withStyle(SpanStyle(color = Color(0xFF2DD4BF))) {
+                is MdSpan.Link -> withStyle(
+                    SpanStyle(color = Color(0xFF2DD4BF))
+                ) {
                     append(span.text)
                 }
             }
         }
     }
-    Text(text = annotated, style = style, color = color)
 }

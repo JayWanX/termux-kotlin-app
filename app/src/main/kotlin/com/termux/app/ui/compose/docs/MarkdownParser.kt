@@ -27,6 +27,7 @@ object MarkdownParser {
 
     private val BULLET_REGEX = Regex("^(\\s*)[-*+]\\s+(.*)$")
     private val NUMBERED_REGEX = Regex("^(\\s*)(\\d+)[.)]\\s+(.*)$")
+    private val HTML_COMMENT_REGEX = Regex("(?s)<!--.*?-->")
 
     private fun isUnderline(line: String): Boolean {
         val t = line.trim()
@@ -45,7 +46,10 @@ object MarkdownParser {
      */
     fun parse(source: String): List<MdBlock> {
         val blocks = ArrayList<MdBlock>()
-        val normalized = source.replace("\r\n", "\n").replace('\r', '\n')
+        // Strip HTML comments (the bundled docs end with an HTML comment) and
+        // normalise line endings.
+        val withoutComments = HTML_COMMENT_REGEX.replace(source, "")
+        val normalized = withoutComments.replace("\r\n", "\n").replace('\r', '\n')
         val lines = normalized.split('\n')
 
         val paragraph = StringBuilder()
