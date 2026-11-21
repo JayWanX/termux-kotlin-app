@@ -930,6 +930,18 @@ class TermuxActivity : AppCompatActivity(), ServiceConnection {
      * layout, so that enabling or deleting the assistant never affects terminal behaviour.
      */
     private fun toggleAssistantPanel() {
+        try {
+            openAssistantPanel()
+        } catch (e: Throwable) {
+            // An optional feature must never take the terminal down with it. Whatever went wrong, keep
+            // the app alive and leave a trace that can be read with logcat.
+            Logger.logError(LOG_TAG, "Failed to open assistant panel: ${e.message}")
+            Logger.logStackTraceWithMessage(LOG_TAG, "assistant panel failure", e)
+            Toast.makeText(this, R.string.assistant_open_failed, Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun openAssistantPanel() {
         val config = com.termux.app.ai.AiConfig.get(this)
         if (!config.isUsable()) {
             Toast.makeText(this, R.string.assistant_not_configured, Toast.LENGTH_LONG).show()
@@ -947,7 +959,11 @@ class TermuxActivity : AppCompatActivity(), ServiceConnection {
 
         val controller = aiPanelController ?: run {
             val container = ensureAiPanelContainer()
-            val created = AiPanelController(lifecycleOwner = this, container = container, terminal = terminalControl)
+            val created = AiPanelController(
+                lifecycleOwner = this,
+                container = container,
+                terminal = terminalControl,
+            )
             aiPanelController = created
             created
         }

@@ -1,6 +1,7 @@
 package com.termux.app.ai
 
 import android.content.Context
+import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import com.termux.shared.logger.Logger
@@ -54,7 +55,7 @@ class AiConfig private constructor(private val context: Context) {
             }
     }
 
-    private val prefs = try {
+    private val prefs: SharedPreferences = try {
         val masterKey = MasterKey.Builder(context)
             .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
             .build()
@@ -69,6 +70,11 @@ class AiConfig private constructor(private val context: Context) {
         // Encrypted storage can fail on unusual devices; degrade to plain preferences so the assistant
         // is still usable, but log loudly because the key is then less protected.
         Logger.logError(LOG_TAG, "Encrypted preferences unavailable, falling back to plain: ${e.message}")
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    } catch (e: Error) {
+        // Tink can fail to initialise with an Error rather than an Exception (missing provider, keystore
+        // unavailable). Letting that escape would crash whichever screen touched the assistant settings.
+        Logger.logError(LOG_TAG, "Encrypted preferences failed to load: ${e.message}")
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     }
 

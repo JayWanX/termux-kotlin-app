@@ -252,6 +252,7 @@
     <!-- Optional assistant -->
     <string name="assistant_menu_entry">Assistant</string>
     <string name="assistant_not_configured">Assistant is disabled or not configured. Enable it in Settings → Terminal → Assistant.</string>
+    <string name="assistant_open_failed">Could not open the assistant. See logcat for details.</string>
     <string name="assistant_preferences_title">Assistant</string>
     <string name="assistant_preferences_summary">Optional AI helper that can read the terminal and run commands</string>
     <string name="assistant_category_general">General</string>

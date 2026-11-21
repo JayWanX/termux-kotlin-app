@@ -7,6 +7,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.ComposeView
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.setViewTreeLifecycleOwner
+import androidx.lifecycle.setViewTreeViewModelStoreOwner
+import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import com.termux.shared.logger.Logger
 import com.termux.shared.terminal.TerminalControl
 import kotlinx.coroutines.Job
@@ -66,8 +69,17 @@ class AiPanelController(
         }
         val view = composeView ?: createComposeView(current).also {
             composeView = it
-            container.addView(it)
+            container.addView(
+                it,
+                FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                ),
+            )
         }
+        // The container itself starts hidden; both it and the child must be made visible, otherwise the
+        // panel is present in the tree but never drawn.
+        container.visibility = android.view.View.VISIBLE
         view.visibility = android.view.View.VISIBLE
         panelVisible = true
     }
@@ -75,6 +87,7 @@ class AiPanelController(
     /** Hides the panel. Cancels any in-flight turn. */
     fun hide() {
         composeView?.visibility = android.view.View.GONE
+        container.visibility = android.view.View.GONE
         panelVisible = false
         stop()
     }
@@ -93,8 +106,26 @@ class AiPanelController(
         session = null
     }
 
-    private fun createComposeView(current: AgentSession): ComposeView =
-        ComposeView(container.context).apply {
+    private fun createComposeView(current: AgentSession): ComposeView {
+        // Compose resolves the view tree owners by walking up from the ComposeView to its nearest
+        // ancestors. Setting them on the ComposeView is not enough when it has not been attached to a
+        // window yet, so they are set on the container first; Compose then finds them while detached.
+        container.setViewTreeLifecycleOwner(lifecycleOwner)
+        (lifecycleOwner as? androidx.savedstate.SavedStateRegistryOwner)?.let {
+            container.setViewTreeSavedStateRegistryOwner(it)
+        }
+        (lifecycleOwner as? androidx.lifecycle.ViewModelStoreOwner)?.let {
+            container.setViewTreeViewModelStoreOwner(it)
+        }
+
+        return ComposeView(container.context).apply {
+            setViewTreeLifecycleOwner(lifecycleOwner)
+            (lifecycleOwner as? androidx.savedstate.SavedStateRegistryOwner)?.let {
+                setViewTreeSavedStateRegistryOwner(it)
+            }
+            (lifecycleOwner as? androidx.lifecycle.ViewModelStoreOwner)?.let {
+                setViewTreeViewModelStoreOwner(it)
+            }
             setContent {
                 var terminalState by mutableStateOf(terminal.state.value)
                 androidx.compose.runtime.LaunchedEffect(Unit) {
@@ -112,6 +143,7 @@ class AiPanelController(
                 )
             }
         }
+    }
 
     private fun send(current: AgentSession, text: String) {
         runningJob?.cancel()
