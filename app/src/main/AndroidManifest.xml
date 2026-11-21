@@ -206,16 +206,6 @@
             </intent-filter>
         </receiver>
 
-        <!-- Agent Worker for periodic health checks -->
-        <receiver
-            android:name=".app.agents.daemon.AgentWorker"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="com.termux.agent.HEALTH_CHECK" />
-                <action android:name="com.termux.agent.SIGNAL_CLEANUP" />
-            </intent-filter>
-        </receiver>
-
         <receiver
             android:name=".shared.activities.ReportActivity$ReportActivityBroadcastReceiver"
             android:exported="false" />
@@ -241,16 +231,6 @@
             <intent-filter>
                 <action android:name="${TERMUX_PACKAGE_NAME}.RUN_COMMAND" />
             </intent-filter>
-        </service>
-
-        <!-- Agent Service for autonomous background agents -->
-        <service
-            android:name=".app.AgentService"
-            android:exported="false"
-            android:foregroundServiceType="specialUse">
-            <property
-                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="Autonomous agent framework for background task execution" />
         </service>
 
         <!-- Boot Service for executing ~/.termux/boot/ scripts on device boot -->
