@@ -21,6 +21,9 @@ jobs:
       with:
         distribution: 'temurin'
         java-version: '17'
+    - name: Check module layering rules
+      run: |
+        bash scripts/check-layering.sh
     - name: Execute tests
       run: |
         ./gradlew test

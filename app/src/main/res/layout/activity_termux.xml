@@ -16,11 +16,20 @@
         android:layout_marginVertical="0dp"
         android:orientation="vertical">
 
+        <!-- Shown only while the session is busy or has exited; hidden when idle. -->
+        <com.termux.app.terminal.TerminalStatusView
+            android:id="@+id/terminal_status_view"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_alignParentTop="true"
+            android:visibility="gone" />
+
         <com.termux.view.TerminalView
             android:id="@+id/terminal_view"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:layout_alignParentTop="true"
+            android:layout_below="@+id/terminal_status_view"
             android:layout_above="@+id/terminal_toolbar_view_pager"
             android:defaultFocusHighlightEnabled="false"
             android:focusableInTouchMode="true"

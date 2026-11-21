@@ -31,6 +31,9 @@ android {
 
         implementation "com.termux:termux-am-library:v2.0.0"
         implementation "org.jetbrains.kotlin:kotlin-stdlib:$kotlin_version"
+
+        // Terminal state is exposed as a StateFlow, so callers can observe it without polling.
+        api libs.bundles.coroutines
     }
 
     defaultConfig {

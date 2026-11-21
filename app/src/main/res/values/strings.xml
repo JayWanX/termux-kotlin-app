@@ -242,4 +242,64 @@
     <!-- About Preference -->
     <string name="about_preference_title">About</string>
 
+    <!-- Command completion notifications -->
+    <string name="command_completion_title">Command finished</string>
+    <string name="command_completion_fallback_session">Terminal session</string>
+    <string name="command_completion_finished">finished</string>
+    <string name="command_completion_success">succeeded</string>
+    <string name="command_completion_failure">failed (exit %1$d)</string>
+
+    <!-- Optional assistant -->
+    <string name="assistant_menu_entry">Assistant</string>
+    <string name="assistant_not_configured">Assistant is disabled or not configured. Enable it in Settings → Terminal → Assistant.</string>
+    <string name="assistant_preferences_title">Assistant</string>
+    <string name="assistant_preferences_summary">Optional AI helper that can read the terminal and run commands</string>
+    <string name="assistant_category_general">General</string>
+    <string name="assistant_category_endpoint">Endpoint</string>
+    <string name="assistant_category_behaviour">Behaviour</string>
+    <string name="assistant_enabled_title">Enable assistant</string>
+    <string name="assistant_enabled_summary">Adds an Assistant entry to the terminal menu</string>
+    <string name="assistant_enable_needs_config">Set an endpoint and model before enabling the assistant.</string>
+    <string name="assistant_preset_title">Provider</string>
+    <string name="assistant_preset_summary">Fills in the endpoint and model for a common provider</string>
+    <string name="assistant_api_url_title">API endpoint</string>
+    <string name="assistant_api_url_empty">Not set</string>
+    <string name="assistant_api_key_title">API key</string>
+    <string name="assistant_api_key_empty">Not set</string>
+    <string name="assistant_model_title">Model</string>
+    <string name="assistant_model_empty">Not set</string>
+    <string name="assistant_max_rounds_title">Tool rounds per message</string>
+    <string name="assistant_max_rounds_summary">How many tool calls the assistant may make before stopping</string>
+    <string name="assistant_confirm_title">Confirm every command</string>
+    <string name="assistant_confirm_summary">Ask before the assistant runs a shell command</string>
+    <string name="assistant_confirm_edits_title">Confirm every file edit</string>
+    <string name="assistant_confirm_edits_summary">Ask before the assistant edits or overwrites a file</string>
+
+    <!-- Terminal status strip -->
+    <string name="status_running">Running</string>
+    <string name="status_exited">Exited</string>
+
+    <!-- Scrollback search -->
+    <string name="action_search">Search</string>
+    <string name="search_hint">Search scrollback</string>
+    <string name="search_no_matches">No matches</string>
+    <string name="search_no_session">No terminal session to search</string>
+
+    <!-- Session templates -->
+    <string name="action_new_from_template">New from template</string>
+    <string name="action_manage_templates">Manage</string>
+    <string name="template_none">No templates defined</string>
+    <string name="template_builtin_label">%1$s (built-in)</string>
+    <string name="template_builtin_undeletable">Built-in templates cannot be deleted</string>
+    <string name="template_delete_title">Delete template?</string>
+    <string name="template_delete_confirm">Delete</string>
+
+    <!-- Command history -->
+    <string name="action_command_history">Command history</string>
+    <string name="history_empty">No commands recorded yet</string>
+    <string name="history_unavailable">Command history is not available yet</string>
+    <string name="search_prev">Previous</string>
+    <string name="search_next">Next</string>
+    <string name="search_close">Close</string>
+
 </resources>

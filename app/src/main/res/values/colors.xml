@@ -1,3 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- Terminal status strip -->
+    <color name="status_running_text">#FFE8EAED</color>
+    <color name="status_running_bg">#FF2E4A32</color>
+    <color name="status_exited_text">#FFFFFFFF</color>
+    <color name="status_exited_bg">#FF6B2B2B</color>
 </resources>
