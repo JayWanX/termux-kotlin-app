@@ -108,6 +108,9 @@ class TermuxActivity : AppCompatActivity(), ServiceConnection {
     /** Container the assistant panel is mounted into, created lazily. */
     private var aiPanelContainer: FrameLayout? = null
 
+    /** True when the side panel is narrow enough that labels should be abbreviated. */
+    private var aiPanelIsCompact: Boolean = false
+
     /** The [com.termux.view.TerminalViewClient] interface implementation. */
     var mTermuxTerminalViewClient: TermuxTerminalViewClient? = null
 
@@ -986,6 +989,7 @@ class TermuxActivity : AppCompatActivity(), ServiceConnection {
                 lifecycleOwner = this,
                 container = container,
                 terminal = terminalControl,
+                compact = aiPanelIsCompact,
             )
             aiPanelController = created
             created
@@ -1002,37 +1006,26 @@ class TermuxActivity : AppCompatActivity(), ServiceConnection {
     private fun ensureAiPanelContainer(): FrameLayout {
         aiPanelContainer?.let { return it }
 
-        // The overlay must live in the relative layout so it covers the terminal.
-        //
-        // `generateLayoutParams(null)` is not usable here: RelativeLayout throws
-        // "You must supply a layout_width attribute" when handed an empty attribute set. Constructing
-        // the parent's own LayoutParams type directly is the safe way to get both a matching type and
-        // the required width/height.
+        // The panel is a side sheet, not a full-screen replacement: the assistant's purpose is to act on
+        // the terminal, so the terminal must stay visible while reading replies. A full-width overlay
+        // would force the user to close the panel to see what it did.
         val parent = findViewById<ViewGroup>(R.id.activity_termux_root_relative_layout)
             ?: findViewById<ViewGroup>(android.R.id.content)
             ?: error("no view group to host the assistant panel")
 
+        val width = assistantPanelWidth()
         val container = FrameLayout(this)
+
         val params: ViewGroup.LayoutParams = when (parent) {
             is android.widget.RelativeLayout ->
-                android.widget.RelativeLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                )
+                android.widget.RelativeLayout.LayoutParams(width, ViewGroup.LayoutParams.MATCH_PARENT)
+                    .apply { addRule(android.widget.RelativeLayout.ALIGN_PARENT_RIGHT) }
             is android.widget.LinearLayout ->
-                android.widget.LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                )
+                android.widget.LinearLayout.LayoutParams(width, ViewGroup.LayoutParams.MATCH_PARENT)
             is FrameLayout ->
-                FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                )
-            else -> ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT,
-            )
+                FrameLayout.LayoutParams(width, ViewGroup.LayoutParams.MATCH_PARENT)
+                    .apply { gravity = android.view.Gravity.END }
+            else -> ViewGroup.LayoutParams(width, ViewGroup.LayoutParams.MATCH_PARENT)
         }
         container.layoutParams = params
         container.visibility = View.GONE
@@ -1042,8 +1035,27 @@ class TermuxActivity : AppCompatActivity(), ServiceConnection {
 
         parent.addView(container)
         aiPanelContainer = container
+        aiPanelIsCompact = width < dp(320)
         return container
     }
+
+    /**
+     * Width of the side panel.
+     *
+     * The panel must stay beside the terminal rather than covering it, so the minimum is also clamped to
+     * a fraction of the screen: on a narrow phone a fixed 260dp minimum could otherwise take up most of
+     * the width and defeat the point of a side panel.
+     */
+    private fun assistantPanelWidth(): Int {
+        val screenWidth = resources.displayMetrics.widthPixels
+        val target = (screenWidth * ASSISTANT_PANEL_WIDTH_FRACTION).toInt()
+        val minWidth = minOf(dp(260), (screenWidth * ASSISTANT_MAX_WIDTH_FRACTION).toInt())
+        val maxWidth = minOf(dp(420), screenWidth)
+        return target.coerceIn(minWidth, maxWidth)
+    }
+
+    private fun dp(value: Int): Int =
+        (value * resources.displayMetrics.density).toInt()
 
     val preferences: TermuxAppSharedPreferences?
         get() = mPreferences
@@ -1141,6 +1153,22 @@ class TermuxActivity : AppCompatActivity(), ServiceConnection {
         private const val CONTEXT_MENU_HELP_ID = 7
         private const val CONTEXT_MENU_SETTINGS_ID = 8
         private const val CONTEXT_MENU_ASSISTANT_ID = 9
+
+        /**
+         * Side panel width as a fraction of the screen.
+         *
+         * Deliberately well under half: the point of the panel is to sit beside the terminal, not to
+         * cover it.
+         */
+        private const val ASSISTANT_PANEL_WIDTH_FRACTION = 0.42f
+
+        /**
+         * Upper bound on the panel's minimum width, as a fraction of the screen.
+         *
+         * Without this a 260dp minimum on a high-density phone resolves to more than half the screen,
+         * which would turn the side panel back into a full-screen cover.
+         */
+        private const val ASSISTANT_MAX_WIDTH_FRACTION = 0.45f
 
         private const val ARG_TERMINAL_TOOLBAR_TEXT_INPUT = "terminal_toolbar_text_input"
         private const val ARG_ACTIVITY_RECREATED = "activity_recreated"

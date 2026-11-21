@@ -25,6 +25,8 @@ class AiPanelController(
     private val lifecycleOwner: LifecycleOwner,
     private val container: FrameLayout,
     private val terminal: TerminalControl,
+    /** True on narrow screens, where labels are abbreviated to fit the side panel. */
+    private val compact: Boolean = false,
 ) {
 
     companion object {
@@ -140,6 +142,7 @@ class AiPanelController(
                     onConfirm = { approved -> current.answerConfirmation(approved) },
                     onReset = { current.reset() },
                     onClose = { hide() },
+                    compact = compact,
                 )
             }
         }

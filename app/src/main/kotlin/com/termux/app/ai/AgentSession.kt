@@ -149,13 +149,23 @@ class AgentSession(
                 replaceMessage(message.copy(steps = steps))
             }
 
+            is AgentEvent.TextDelta -> {
+                // Append incrementally so the panel shows the reply as it is generated.
+                val message = current.messages.find { it.id == assistantId } ?: return
+                replaceMessage(message.copy(text = message.text + event.text))
+            }
+
             is AgentEvent.ConfirmationRequired -> {
                 _state.value = current.copy(pendingConfirmation = event.summary)
             }
 
             is AgentEvent.Final -> {
                 val message = current.messages.find { it.id == assistantId } ?: return
-                replaceMessage(message.copy(text = event.text))
+                // The streamed text is already present; only overwrite when the final text differs,
+                // which happens for locally generated notices such as the round-limit message.
+                if (message.text.isBlank() || message.text != event.text) {
+                    replaceMessage(message.copy(text = event.text))
+                }
             }
         }
     }

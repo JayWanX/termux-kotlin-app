@@ -4,15 +4,16 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -34,20 +35,23 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.termux.app.ui.compose.theme.TermuxTheme
 import com.termux.shared.terminal.TerminalState
 
 /**
  * The assistant panel.
  *
- * Deliberately plain: a scrolling transcript, an input field and a stop button. The value is in being
- * able to see what the assistant is doing to the terminal, not in chat-app chrome.
+ * Rendered as a side panel rather than a full-screen sheet: the point of the assistant is to act on the
+ * terminal, so the terminal has to stay visible while reading its replies. On narrow screens the panel
+ * takes a fraction of the width for the same reason.
  *
- * Rendered only when [AiAssistant.isAvailable], so the panel cannot appear for users who never enabled
- * the feature.
+ * Wrapped in [TermuxTheme] so it follows the app's dark/light setting instead of falling back to the
+ * Material default, which would show a bright white sheet inside an otherwise dark app.
  */
 @Composable
 fun AiPanel(
@@ -59,56 +63,63 @@ fun AiPanel(
     onReset: () -> Unit,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
+    compact: Boolean = false,
 ) {
-    val state by session.state.collectAsStateWithLifecycle()
-    val listState = rememberLazyListState()
-    var input by remember { mutableStateOf("") }
+    TermuxTheme {
+        val state by session.state.collectAsStateWithLifecycle()
+        val listState = rememberLazyListState()
+        var input by remember { mutableStateOf("") }
 
-    // Keep the newest message visible as the turn progresses.
-    LaunchedEffect(state.messages.size, state.round) {
-        if (state.messages.isNotEmpty()) {
-            listState.animateScrollToItem(state.messages.lastIndex)
+        // Follow the newest message as it streams in.
+        LaunchedEffect(state.messages.size, state.round, state.messages.lastOrNull()?.text?.length) {
+            if (state.messages.isNotEmpty()) {
+                listState.animateScrollToItem(state.messages.lastIndex)
+            }
         }
-    }
 
-    Surface(modifier = modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
-        Column(Modifier.fillMaxSize()) {
-            PanelHeader(
-                state = state,
-                terminalState = terminalState,
-                onReset = onReset,
-                onStop = onStop,
-                onClose = onClose,
-            )
-            HorizontalDivider()
+        Surface(
+            modifier = modifier.fillMaxSize(),
+            color = MaterialTheme.colorScheme.surface,
+        ) {
+            Column(Modifier.fillMaxSize()) {
+                PanelHeader(
+                    state = state,
+                    terminalState = terminalState,
+                    onReset = onReset,
+                    onStop = onStop,
+                    onClose = onClose,
+                    compact = compact,
+                )
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline)
 
-            LazyColumn(
-                state = listState,
-                modifier = Modifier.weight(1f).fillMaxWidth(),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                items(state.messages, key = { it.id }) { message ->
-                    MessageBubble(message)
-                }
-            }
-
-            state.pendingConfirmation?.let { summary ->
-                ConfirmationBar(summary = summary, onConfirm = onConfirm)
-            }
-
-            InputBar(
-                value = input,
-                enabled = !state.isRunning && state.pendingConfirmation == null,
-                onValueChange = { input = it },
-                onSend = {
-                    val text = input.trim()
-                    if (text.isNotEmpty()) {
-                        input = ""
-                        onSend(text)
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                    contentPadding = PaddingValues(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    items(state.messages, key = { it.id }) { message ->
+                        MessageBubble(message, compact = compact)
                     }
-                },
-            )
+                }
+
+                state.pendingConfirmation?.let { summary ->
+                    ConfirmationBar(summary = summary, onConfirm = onConfirm)
+                }
+
+                InputBar(
+                    value = input,
+                    enabled = !state.isRunning && state.pendingConfirmation == null,
+                    onValueChange = { input = it },
+                    onSend = {
+                        val text = input.trim()
+                        if (text.isNotEmpty()) {
+                            input = ""
+                            onSend(text)
+                        }
+                    },
+                )
+            }
         }
     }
 }
@@ -120,11 +131,12 @@ private fun PanelHeader(
     onReset: () -> Unit,
     onStop: () -> Unit,
     onClose: () -> Unit,
+    compact: Boolean,
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+            .padding(horizontal = 8.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
@@ -133,7 +145,7 @@ private fun PanelHeader(
                 text = buildString {
                     append(describeTerminalState(terminalState))
                     if (state.isRunning) {
-                        append(" · round ${state.round}/${state.maxRounds}")
+                        append(" · ${state.round}/${state.maxRounds}")
                     }
                 },
                 style = MaterialTheme.typography.bodySmall,
@@ -141,22 +153,24 @@ private fun PanelHeader(
             )
         }
         if (state.isRunning) {
-            CircularProgressIndicator(
-                modifier = Modifier.size(16.dp),
-                strokeWidth = 2.dp,
-            )
-            Spacer(Modifier.width(8.dp))
-            TextButton(onClick = onStop) { Text("Stop") }
-        } else {
-            TextButton(onClick = onReset, enabled = state.messages.isNotEmpty()) { Text("Clear") }
+            CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+            Spacer(Modifier.width(4.dp))
+            TextButton(onClick = onStop, contentPadding = PaddingValues(horizontal = 6.dp)) {
+                Text("Stop", style = MaterialTheme.typography.labelSmall)
+            }
+        } else if (state.messages.isNotEmpty()) {
+            TextButton(onClick = onReset, contentPadding = PaddingValues(horizontal = 6.dp)) {
+                Text("Clear", style = MaterialTheme.typography.labelSmall)
+            }
         }
-        // Without this the panel could only be dismissed from the menu that opened it.
-        TextButton(onClick = onClose) { Text("Close") }
+        TextButton(onClick = onClose, contentPadding = PaddingValues(horizontal = 6.dp)) {
+            Text(if (compact) "×" else "Close", style = MaterialTheme.typography.labelSmall)
+        }
     }
 }
 
 @Composable
-private fun MessageBubble(message: TurnMessage) {
+private fun MessageBubble(message: TurnMessage, compact: Boolean) {
     val isUser = message.role == ChatMsg.ROLE_USER
     val alignment = if (isUser) Alignment.End else Alignment.Start
     val background = if (isUser) {
@@ -167,31 +181,38 @@ private fun MessageBubble(message: TurnMessage) {
 
     Column(Modifier.fillMaxWidth(), horizontalAlignment = alignment) {
         if (message.steps.isNotEmpty()) {
-            message.steps.forEach { step -> ToolStepRow(step) }
+            message.steps.forEach { step -> ToolStepRow(step, compact) }
         }
         if (message.text.isNotBlank()) {
             Box(
                 modifier = Modifier
-                    .widthIn(max = 320.dp)
-                    .background(background, RoundedCornerShape(10.dp))
-                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                    .fillMaxWidth(if (isUser) 0.9f else 1f)
+                    .background(background, RoundedCornerShape(8.dp))
+                    .padding(horizontal = 9.dp, vertical = 7.dp),
             ) {
-                Text(
-                    text = message.text,
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontFamily = if (isUser) FontFamily.Default else FontFamily.Default,
-                )
+                if (isUser) {
+                    // User input is shown verbatim; rendering it as Markdown would mangle commands.
+                    Text(
+                        text = message.text,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    )
+                } else {
+                    MarkdownText(
+                        markdown = message.text,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
             }
         }
     }
 }
 
 @Composable
-private fun ToolStepRow(step: TurnStep) {
+private fun ToolStepRow(step: TurnStep, compact: Boolean) {
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 2.dp),
+        modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp),
         verticalAlignment = Alignment.Top,
     ) {
         Text(
@@ -203,18 +224,19 @@ private fun ToolStepRow(step: TurnStep) {
                 MaterialTheme.colorScheme.onSurfaceVariant
             },
         )
-        Spacer(Modifier.width(6.dp))
+        Spacer(Modifier.width(4.dp))
         Column {
             Text(
                 text = step.label,
-                style = MaterialTheme.typography.bodySmall,
+                style = MaterialTheme.typography.labelSmall,
                 fontFamily = FontFamily.Monospace,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            if (step.detail.isNotBlank()) {
+            if (step.detail.isNotBlank() && !compact) {
                 Text(
-                    text = step.detail.take(200),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    text = step.detail.take(160),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.outline,
                     fontFamily = FontFamily.Monospace,
                 )
             }
@@ -225,17 +247,26 @@ private fun ToolStepRow(step: TurnStep) {
 @Composable
 private fun ConfirmationBar(summary: String, onConfirm: (Boolean) -> Unit) {
     Surface(color = MaterialTheme.colorScheme.errorContainer) {
-        Column(Modifier.fillMaxWidth().padding(12.dp)) {
-            Text("Approval required", style = MaterialTheme.typography.labelMedium)
+        Column(Modifier.fillMaxWidth().padding(8.dp)) {
+            Text(
+                "Approval required",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onErrorContainer,
+            )
             Text(
                 text = summary,
-                style = MaterialTheme.typography.bodySmall,
+                style = MaterialTheme.typography.labelSmall,
                 fontFamily = FontFamily.Monospace,
-                modifier = Modifier.padding(vertical = 6.dp),
+                color = MaterialTheme.colorScheme.onErrorContainer,
+                modifier = Modifier.padding(vertical = 4.dp),
             )
             Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
-                TextButton(onClick = { onConfirm(false) }) { Text("Deny") }
-                TextButton(onClick = { onConfirm(true) }) { Text("Allow") }
+                TextButton(onClick = { onConfirm(false) }, contentPadding = PaddingValues(horizontal = 6.dp)) {
+                    Text("Deny", style = MaterialTheme.typography.labelSmall)
+                }
+                TextButton(onClick = { onConfirm(true) }, contentPadding = PaddingValues(horizontal = 6.dp)) {
+                    Text("Allow", style = MaterialTheme.typography.labelSmall)
+                }
             }
         }
     }
@@ -249,23 +280,24 @@ private fun InputBar(
     onSend: () -> Unit,
 ) {
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(8.dp),
-        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth().padding(6.dp),
+        verticalAlignment = Alignment.Bottom,
     ) {
         OutlinedTextField(
             value = value,
             onValueChange = onValueChange,
-            modifier = Modifier.weight(1f).heightIn(max = 120.dp),
+            modifier = Modifier.weight(1f).heightIn(max = 96.dp),
             enabled = enabled,
-            placeholder = { Text("Ask about the terminal…") },
+            placeholder = { Text("Ask about the terminal…", style = MaterialTheme.typography.bodySmall) },
+            textStyle = MaterialTheme.typography.bodySmall,
             maxLines = 4,
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
             keyboardActions = KeyboardActions(onSend = { onSend() }),
         )
-        Spacer(Modifier.width(8.dp))
-        TextButton(onClick = onSend, enabled = enabled && value.isNotBlank()) { Text("Send") }
+        Spacer(Modifier.width(4.dp))
+        TextButton(onClick = onSend, enabled = enabled && value.isNotBlank()) {
+            Text("Send", style = MaterialTheme.typography.labelMedium)
+        }
     }
 }
 
