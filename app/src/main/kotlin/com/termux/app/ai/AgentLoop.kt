@@ -3,8 +3,11 @@ package com.termux.app.ai
 import com.termux.shared.terminal.TerminalControl
 import com.termux.shared.terminal.TerminalSnapshot
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.launch
 import org.json.JSONObject
 
 /** Events surfaced to the UI while a turn is running. */
@@ -20,6 +23,9 @@ sealed interface AgentEvent {
 
     /** The user must approve something; the UI shows a dialog. */
     data class ConfirmationRequired(val summary: String) : AgentEvent
+
+    /** A chunk of assistant text, so the panel can render it as it arrives. */
+    data class TextDelta(val text: String) : AgentEvent
 
     /** Final answer, or an explanation of why the turn ended. */
     data class Final(val text: String) : AgentEvent
@@ -49,7 +55,7 @@ sealed interface AgentResult {
  *    itself by passing a flag.
  */
 class AgentLoop(
-    private val client: OpenAiClient,
+    private val streamingClient: StreamingChatClient,
     private val registry: ToolRegistry,
     private val config: AiConfig,
 ) {
@@ -113,21 +119,47 @@ class AgentLoop(
                 // Refresh the snapshot every round so the model reasons about the screen as it is now.
                 replaceEphemeralSnapshot(working, context.terminal)
 
-                val completion = client.complete(working, registry.specs()).getOrElse { error ->
-                    return AgentResult.Failed(error.message ?: "request failed")
+                // Streaming so the panel can render text as it is generated instead of waiting for the
+                // whole reply. Tool calls are still delivered whole at the end of the stream.
+                //
+                // The delta callback is not a suspending context, so deltas are buffered in a channel
+                // and drained here, where onEvent can be awaited.
+                val deltaChannel = Channel<String>(capacity = Channel.UNLIMITED)
+                var completion: Completion? = null
+                var streamError: Throwable? = null
+
+                coroutineScope {
+                    val drain = launch {
+                        for (delta in deltaChannel) {
+                            onEvent(AgentEvent.TextDelta(delta))
+                        }
+                    }
+                    streamingClient.stream(working, registry.specs()) { delta ->
+                        deltaChannel.trySend(delta)
+                    }.collect { result ->
+                        completion = result.getOrNull()
+                        streamError = result.exceptionOrNull()
+                    }
+                    deltaChannel.close()
+                    drain.join()
                 }
 
-                if (completion.toolCalls.isEmpty()) {
-                    val text = completion.content?.trim().orEmpty()
+                val outcome = completion
+                    ?: return AgentResult.Failed(
+                        streamError?.message ?: "request failed or was cancelled",
+                    )
+
+                if (outcome.toolCalls.isEmpty()) {
+                    val text = outcome.content?.trim().orEmpty()
                     onEvent(AgentEvent.Final(text))
                     return AgentResult.Done(text)
                 }
 
-                working += ChatMsg.assistant(completion.content, completion.toolCalls)
+                working += ChatMsg.assistant(outcome.content, outcome.toolCalls)
                 round++
                 onEvent(AgentEvent.RoundProgress(round, maxRounds))
 
-                for (call in completion.toolCalls) {
+                for (call in outcome.toolCalls) {
                     currentCoroutineContext().ensureActive()
                     val result = executeTool(call, context, onEvent)
                     working += ChatMsg.tool(call.id, result.asToolText())

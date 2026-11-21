@@ -1,6 +1,7 @@
 package com.termux.app.ai
 
 import android.widget.FrameLayout
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -25,10 +26,15 @@ class AiPanelController(
     private val lifecycleOwner: LifecycleOwner,
     private val container: FrameLayout,
     private val terminal: TerminalControl,
+    /** True on narrow screens, where labels are abbreviated to fit the side panel. */
+    private val compact: Boolean = false,
 ) {
 
     companion object {
         private const val LOG_TAG = "AiPanelController"
+
+        /** Duration of the slide-in and slide-out. Short enough to feel immediate on a gesture. */
+        private const val PANEL_ANIMATION_MS = 180L
     }
 
     private var session: AgentSession? = null
@@ -61,7 +67,7 @@ class AiPanelController(
         if (panelVisible) hide() else show()
     }
 
-    /** Shows the panel. */
+    /** Shows the panel, sliding it in from the right edge. */
     fun show() {
         val current = session() ?: run {
             Logger.logWarn(LOG_TAG, "Assistant not configured; ignoring show request")
@@ -82,14 +88,51 @@ class AiPanelController(
         container.visibility = android.view.View.VISIBLE
         view.visibility = android.view.View.VISIBLE
         panelVisible = true
+
+        // A side sheet that snaps into place is hard to follow: the terminal beside it changes width
+        // instantly and there is no cue about where the panel came from. Sliding it in from its own edge
+        // makes the movement legible and ties it to the gesture that opened it.
+        container.animate().cancel()
+        container.translationX = container.width.toFloat().takeIf { it > 0f } ?: 0f
+        container.alpha = 0.7f
+        container.animate()
+            .translationX(0f)
+            .alpha(1f)
+            .setDuration(PANEL_ANIMATION_MS)
+            .setInterpolator(android.view.animation.DecelerateInterpolator())
+            .start()
     }
 
-    /** Hides the panel. Cancels any in-flight turn. */
+    /** Hides the panel, sliding it back out. Cancels any in-flight turn. */
     fun hide() {
-        composeView?.visibility = android.view.View.GONE
-        container.visibility = android.view.View.GONE
         panelVisible = false
         stop()
+
+        val onHidden = {
+            // Only collapse if nothing re-opened the panel while the animation was running.
+            if (!panelVisible) {
+                composeView?.visibility = android.view.View.GONE
+                container.visibility = android.view.View.GONE
+                container.alpha = 1f
+                container.translationX = 0f
+            }
+        }
+
+        val width = container.width
+        if (width <= 0) {
+            // Never laid out (or already gone): there is nothing to animate.
+            onHidden()
+            return
+        }
+
+        container.animate().cancel()
+        container.animate()
+            .translationX(width.toFloat())
+            .alpha(0.7f)
+            .setDuration(PANEL_ANIMATION_MS)
+            .setInterpolator(android.view.animation.AccelerateInterpolator())
+            .withEndAction(onHidden)
+            .start()
     }
 
     /** Cancels the current turn, if any. */
@@ -131,15 +174,18 @@ class AiPanelController(
                 androidx.compose.runtime.LaunchedEffect(Unit) {
                     terminal.state.collect { terminalState = it }
                 }
+                val panelState by current.state.collectAsState()
 
                 AiPanel(
-                    session = current,
+                    state = panelState,
                     terminalState = terminalState,
                     onSend = { text -> send(current, text) },
                     onStop = { stop() },
                     onConfirm = { approved -> current.answerConfirmation(approved) },
                     onReset = { current.reset() },
                     onClose = { hide() },
+                    onToggleSteps = { messageId -> current.toggleSteps(messageId) },
+                    compact = compact,
                 )
             }
         }

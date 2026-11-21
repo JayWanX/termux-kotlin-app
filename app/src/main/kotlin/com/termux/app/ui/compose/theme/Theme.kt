@@ -47,7 +47,11 @@ private val DarkColorScheme = darkColorScheme(
     outline = DividerDark,
     outlineVariant = DividerDark,
     error = Color(0xFFF87171),
-    onError = Color(0xFF2A0A0A)
+    onError = Color(0xFF2A0A0A),
+    // Material's stock error container is a saturated red that clashes with the teal and neutral
+    // palette everywhere else. These are muted to sit in the same family as the surfaces.
+    errorContainer = Color(0xFF3B1618),
+    onErrorContainer = Color(0xFFFBD5D5),
 )
 
 private val LightColorScheme = lightColorScheme(
@@ -67,7 +71,10 @@ private val LightColorScheme = lightColorScheme(
     outline = DividerLight,
     outlineVariant = DividerLight,
     error = Color(0xFFB91C1C),
-    onError = Color.White
+    onError = Color.White,
+    // Muted to match the light surfaces instead of Material's default warm pink.
+    errorContainer = Color(0xFFFBE3E3),
+    onErrorContainer = Color(0xFF5A1010),
 )
 
 @Composable

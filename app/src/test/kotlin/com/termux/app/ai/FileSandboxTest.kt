@@ -62,6 +62,41 @@ class FileSandboxConfinementTest {
         assertTrue(resolve("~/docs").path.startsWith(home.path))
     }
 
+    /**
+     * The `~/x` spelling must resolve like a relative path, on every platform.
+     *
+     * This failed only on Linux: stripping `~` leaves `/x`, and on Unix that reads as an absolute path,
+     * so `~/docs` was resolved against the filesystem root and refused. Windows does not treat a
+     * leading `/` as absolute, so the bug was invisible there — the test has to assert the resolved
+     * path directly rather than rely on the platform's parsing to disagree.
+     */
+    @Test
+    fun `tilde subpath resolves to the same file as the relative path`() {
+        assertEquals(
+            resolve("docs/notes.txt").path,
+            resolve("~/docs/notes.txt").path,
+        )
+    }
+
+    @Test
+    fun `tilde subpath is not treated as an absolute path`() {
+        // Guard the specific regression: whatever the platform thinks of a leading slash, `~/x` is
+        // always inside the root.
+        val resolved = resolve("~/a/b/c.txt")
+        assertTrue(
+            "`~/a/b/c.txt` resolved outside the root: ${resolved.path}",
+            FileSandbox.contains(home, resolved),
+        )
+        assertTrue("`~/a/b/c.txt` must keep the sub-path", resolved.path.endsWith("a/b/c.txt") ||
+            resolved.path.endsWith("a\\b\\c.txt"))
+    }
+
+    @Test
+    fun `tilde subpath still cannot escape the root`() {
+        // The expansion must not become an escape hatch.
+        assertRefused("~/../outside.txt")
+    }
+
     @Test
     fun `parent traversal is refused`() {
         assertRefused("../../../etc/passwd")

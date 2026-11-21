@@ -3,10 +3,12 @@ name: Unit tests
 on:
   push:
     branches:
+      - main
       - master
       - android-10
   pull_request:
     branches:
+      - main
       - master
       - android-10
 
@@ -24,6 +26,72 @@ jobs:
     - name: Check module layering rules
       run: |
         bash scripts/check-layering.sh
+    - name: Check workflows do not mask failures
+      # Guards the specific mistake that hid a real sandbox bug: a test step with
+      # continue-on-error made a red suite report green for as long as this workflow existed.
+      run: |
+        python3 scripts/check-workflows.py
     - name: Execute tests
       run: |
         ./gradlew test
+    # A failing Gradle test task reports only "There were failing tests". The names live in the JUnit
+    # XML, and getting them onto the summary page is the difference between diagnosing a CI-only
+    # failure and guessing at it.
+    - name: Summarize failing tests
+      if: failure()
+      run: |
+        python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+        import glob, sys
+        import xml.etree.ElementTree as ET
+
+        total = failures = 0
+        rows = []
+        for path in glob.glob('**/build/test-results/**/*.xml', recursive=True):
+            try:
+                root = ET.parse(path).getroot()
+            except ET.ParseError:
+                continue
+            for suite in ([root] if root.tag == 'testsuite' else root.iter('testsuite')):
+                total += int(suite.get('tests', 0))
+                for case in suite.iter('testcase'):
+                    problems = list(case.findall('failure')) + list(case.findall('error'))
+                    if not problems:
+                        continue
+                    failures += 1
+                    text = (problems[0].text or problems[0].get('message') or '').strip()
+                    rows.append((
+                        f"{case.get('classname', '')}.{case.get('name', '')}",
+                        text.splitlines()[0][:300] if text else '',
+                    ))
+
+        print("## Test results\n")
+        print(f"- total: **{total}**")
+        print(f"- failed: **{failures}**\n")
+        for name, message in rows:
+            print(f"- `{name}`")
+            if message:
+                print(f"  > {message}")
+        if not rows:
+            print("_No JUnit failure records were produced; the task failed before running tests._")
+        PY
+    - name: Upload assistant panel renders
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: assistant-panel-renders
+        path: app/build/panel-render/*.png
+        if-no-files-found: warn
+    - name: Upload test reports
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-results
+        path: '**/build/test-results/**/*.xml'
+        if-no-files-found: warn
+    - name: Upload HTML test report
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-report-html
+        path: '**/build/reports/tests/**'
+        if-no-files-found: warn

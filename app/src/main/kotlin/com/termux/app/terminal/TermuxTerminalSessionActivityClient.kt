@@ -11,7 +11,6 @@ import android.text.TextUtils
 import android.view.ContextThemeWrapper
 import android.view.Menu
 import android.view.View
-import android.widget.ArrayAdapter
 import android.widget.ListView
 import android.widget.PopupMenu
 import com.termux.R
@@ -26,6 +25,8 @@ import com.termux.shared.termux.settings.properties.TermuxPropertyConstants
 import com.termux.shared.termux.shell.command.runner.terminal.TermuxSession
 import com.termux.shared.termux.terminal.TermuxTerminalSessionClientBase
 import com.termux.shared.termux.terminal.io.BellHandler
+import com.termux.shared.terminal.SessionInfo
+import com.termux.shared.terminal.TerminalState
 import com.termux.terminal.TerminalColors
 import com.termux.terminal.TerminalSession
 import com.termux.terminal.TextStyle
@@ -41,7 +42,15 @@ class TermuxTerminalSessionActivityClient(private val mActivity: TermuxActivity)
 
     /** The currently shown session list dialog, if any. Used to refresh it live. */
     private var mSessionListDialog: AlertDialog? = null
-    private var mSessionListAdapter: ArrayAdapter<String>? = null
+    private var mSessionListAdapter: SessionListAdapter? = null
+
+    /**
+     * The list inside the session list dialog.
+     *
+     * Held explicitly because [AlertDialog.getListView] is null for a dialog built with a custom content
+     * view, which silently disabled the current-session highlight.
+     */
+    private var mSessionListView: ListView? = null
 
     /**
      * Should be called when mActivity.onCreate() is called
@@ -384,7 +393,7 @@ class TermuxTerminalSessionActivityClient(private val mActivity: TermuxActivity)
         val adapter = mSessionListAdapter
         val service = mActivity.termuxService
         if (dialog != null && dialog.isShowing && adapter != null && service != null) {
-            refreshSessionListDialog(dialog, service, adapter)
+            refreshSessionListDialog(dialog, service, adapter, mSessionListView)
         }
     }
 
@@ -443,103 +452,118 @@ class TermuxTerminalSessionActivityClient(private val mActivity: TermuxActivity)
     }
 
     /**
-     * Build the display labels for all running sessions.
+     * Builds the rows shown in the session list.
      *
      * Each row carries the session's live state and working directory, so the list doubles as a health
-     * view: a dead session or one stuck in a directory is visible without switching to it.
+     * view: a dead session, or one stuck in an unexpected directory, is visible without switching to it.
      */
-    private fun buildSessionLabels(service: TermuxService): ArrayList<String> {
-        val sessions = ArrayList<String>()
-        val sessionCount = service.termuxSessionsSize
+    private fun buildSessionRows(service: TermuxService): List<SessionRow> {
+        val count = service.termuxSessionsSize
+        val infos = ArrayList<SessionInfo>(count)
+        val names = ArrayList<String?>(count)
 
         // terminalControl is created during onResume; the session dialog can be opened before that on a
         // cold start, so the lookup degrades rather than throwing.
-        val infos = if (mActivity.hasTerminalControl) {
+        val live = if (mActivity.hasTerminalControl) {
             runCatching { mActivity.terminalControl.sessions().associateBy { it.id } }
                 .getOrDefault(emptyMap())
         } else {
             emptyMap()
         }
 
-        for (i in 0 until sessionCount) {
+        for (i in 0 until count) {
             val termuxSession = service.getTermuxSession(i) ?: continue
             val terminalSession = termuxSession.terminalSession
-            val sessionId = terminalSession.mSessionName ?: terminalSession.getPid().toString()
-            val info = infos[sessionId]
+            names.add(terminalSession.mSessionName)
 
-            val label = if (info != null) {
-                SessionLabelFormatter.format(
-                    index = i + 1,
-                    info = info,
-                    name = terminalSession.mSessionName,
-                    title = terminalSession.title,
-                )
-            } else {
-                // Fall back to the previous plain label if the state snapshot is unavailable.
-                val name = terminalSession.mSessionName
-                val head = if (TextUtils.isEmpty(name)) "Session [${i + 1}]" else "$name [${i + 1}]"
-                val processTitle = terminalSession.title
-                if (!processTitle.isNullOrEmpty() && processTitle != name) {
-                    "$head $processTitle"
-                } else {
-                    head
-                }
-            }
-            sessions.add(label)
+            val id = terminalSession.mSessionName ?: terminalSession.getPid().toString()
+            infos.add(
+                live[id] ?: SessionInfo(
+                    id = id,
+                    title = terminalSession.title.orEmpty(),
+                    pid = terminalSession.getPid(),
+                    isRunning = terminalSession.isRunning,
+                    exitStatus = null,
+                    cwd = null,
+                    isAltBuffer = false,
+                    // Without a live snapshot the best available answer is liveness alone.
+                    state = if (terminalSession.isRunning) {
+                        TerminalState.Idle(0L)
+                    } else {
+                        TerminalState.Dead(null)
+                    },
+                ),
+            )
         }
-        return sessions
+
+        return SessionRowBuilder.build(
+            sessions = infos,
+            names = names,
+            currentIndex = service.getIndexOfSession(mActivity.currentSession),
+        )
     }
 
     /**
-     * Show a dialog listing all running sessions so the user can switch between them
+     * Show a dialog listing all running sessions so the user can switch between them.
+     *
+     * The content view is built by [SessionListDialogView] rather than assembled from AlertDialog's
+     * stock buttons, so the actions are sentence-case, share the width evenly, and — importantly — a
+     * button can act without closing the dialog.
      */
     fun showSessionListDialog() {
         val service = mActivity.termuxService ?: return
 
-        // Use a plain ListView adapter instead of setSingleChoiceItems so that
-        // item long presses can be handled (to rename a session in place).
-        val listAdapter = ArrayAdapter(
-            mActivity,
-            android.R.layout.simple_list_item_single_choice,
-            buildSessionLabels(service)
-        )
+        val listAdapter = SessionListAdapter(mActivity)
+        listAdapter.submit(buildSessionRows(service))
         mSessionListAdapter = listAdapter
 
-        val dialog = AlertDialog.Builder(mActivity)
+        lateinit var dialog: AlertDialog
+        val content = SessionListDialogView.build(mActivity) { action, anchor ->
+            when (action) {
+                SessionListAction.OPEN -> Unit
+                SessionListAction.NEW -> {
+                    // Stays open: creating a session is usually the first of several things to do, and
+                    // closing here forced the user to reopen the list to confirm the session appeared.
+                    addNewSession(false, null)
+                    refreshSessionListDialog(dialog, service, listAdapter, mSessionListView)
+                }
+                SessionListAction.MORE -> showSessionMoreMenu(anchor)
+                SessionListAction.CLOSE -> dialog.dismiss()
+            }
+        }
+
+        dialog = AlertDialog.Builder(mActivity)
             .setTitle(R.string.title_session_list)
-            .setAdapter(
-                listAdapter
-            ) { d, which ->
-                switchToSession(which)
-                d.dismiss()
-            }
-            .setNeutralButton(R.string.action_session_list_more, null)
-            .setNegativeButton(R.string.action_new_session) { _, _ ->
-                addNewSession(false, null)
-            }
-            .setPositiveButton(R.string.action_session_list_close, null)
+            .setView(content)
             .create()
 
-        // Bind the "More" button manually so that clicking it neither dismisses
-        // the dialog nor rebuilds it, and so the popup can be anchored directly
-        // below the button.
+        val listView = SessionListDialogView.listOf(content)
+        mSessionListView = listView
+        listView?.apply {
+            adapter = listAdapter
+            choiceMode = ListView.CHOICE_MODE_SINGLE
+            setOnItemClickListener { _, _, position, _ ->
+                switchToSession(position)
+                dialog.dismiss()
+            }
+            setOnItemLongClickListener { _, _, position, _ ->
+                val termuxSession = service.getTermuxSession(position)
+                    ?: return@setOnItemLongClickListener false
+                renameSession(termuxSession.terminalSession)
+                true
+            }
+        }
+
         dialog.setOnShowListener {
-            dialog.getButton(AlertDialog.BUTTON_NEUTRAL)?.setOnClickListener { moreButton ->
-                showSessionMoreMenu(moreButton)
+            // Sizing needs the view to be laid out first: the row width used for measuring comes from
+            // the dialog's final width, which is not known until it is shown.
+            listView?.post {
+                SessionListDialogView.applyListHeight(
+                    listView,
+                    SessionListDialogView.maxListHeightPx(mActivity),
+                )
             }
-
-            // Mark the current session as the checked item.
-            dialog.listView?.apply {
-                choiceMode = ListView.CHOICE_MODE_SINGLE
-                setOnItemLongClickListener { _, _, position, _ ->
-                    val termuxSession = service.getTermuxSession(position)
-                        ?: return@setOnItemLongClickListener false
-                    renameSession(termuxSession.terminalSession)
-                    true
-                }
-            }
-
-            refreshSessionListDialog(dialog, service, listAdapter)
+            refreshSessionListDialog(dialog, service, listAdapter, listView)
         }
 
         mSessionListDialog = dialog
@@ -548,6 +572,7 @@ class TermuxTerminalSessionActivityClient(private val mActivity: TermuxActivity)
             if (mSessionListDialog === dialog) {
                 mSessionListDialog = null
                 mSessionListAdapter = null
+                mSessionListView = null
             }
         }
 
@@ -556,24 +581,35 @@ class TermuxTerminalSessionActivityClient(private val mActivity: TermuxActivity)
 
     /**
      * Rebuild the session list dialog contents in place, keeping the dialog open.
+     *
+     * The ListView is passed in rather than taken from [AlertDialog.getListView]: that property is only
+     * populated when the dialog was built with `setAdapter`, and this dialog uses a custom content view,
+     * so reading it here silently yielded null and the current-session highlight never applied.
      */
     private fun refreshSessionListDialog(
         dialog: AlertDialog,
         service: TermuxService,
-        listAdapter: ArrayAdapter<String>
+        listAdapter: SessionListAdapter,
+        listView: ListView?,
     ) {
-        val labels = buildSessionLabels(service)
-        listAdapter.clear()
-        listAdapter.addAll(labels)
-        listAdapter.notifyDataSetChanged()
+        val rows = buildSessionRows(service)
+        listAdapter.submit(rows)
+
+        // The row count drives the height, so a session created from the bar has to re-measure it.
+        listView?.post {
+            SessionListDialogView.applyListHeight(
+                listView,
+                SessionListDialogView.maxListHeightPx(listView.context),
+            )
+        }
 
         val currentIndex = service.getIndexOfSession(mActivity.currentSession)
-        dialog.listView?.let { listView ->
-            listView.choiceMode = ListView.CHOICE_MODE_SINGLE
-            if (currentIndex in labels.indices) {
-                listView.setItemChecked(currentIndex, true)
+        listView?.let {
+            it.choiceMode = ListView.CHOICE_MODE_SINGLE
+            if (currentIndex in rows.indices) {
+                it.setItemChecked(currentIndex, true)
             } else {
-                listView.clearChoices()
+                it.clearChoices()
             }
         }
     }
@@ -837,10 +873,9 @@ class TermuxTerminalSessionActivityClient(private val mActivity: TermuxActivity)
     /**
      * Show the "More" popup menu anchored below the "More" button.
      *
-     * Provides three actions:
-     * - Create a new system session
-     * - Finish all other sessions, keeping the current one
-     * - Finish all sessions
+     * There used to be a sixth entry, "New system session", which called exactly the same
+     * `addNewSession(false, null)` as the list's New button — two menu entries for one action, which
+     * invites the reader to assume they differ. It is gone; New lives on the bar, one tap away.
      */
     private fun showSessionMoreMenu(anchor: View) {
         val service = mActivity.termuxService ?: return
@@ -854,9 +889,8 @@ class TermuxTerminalSessionActivityClient(private val mActivity: TermuxActivity)
 
         PopupMenu(themedContext, anchor).apply {
             menu.add(Menu.NONE, MENU_SEARCH_SCROLLBACK, Menu.NONE, R.string.action_search)
-            menu.add(Menu.NONE, MENU_NEW_FROM_TEMPLATE, Menu.NONE, R.string.action_new_from_template)
             menu.add(Menu.NONE, MENU_COMMAND_HISTORY, Menu.NONE, R.string.action_command_history)
-            menu.add(Menu.NONE, MENU_NEW_SYSTEM_SESSION, Menu.NONE, R.string.action_new_system_session)
+            menu.add(Menu.NONE, MENU_NEW_FROM_TEMPLATE, Menu.NONE, R.string.action_new_from_template)
             menu.add(Menu.NONE, MENU_FINISH_OTHER_SESSIONS, Menu.NONE, R.string.action_finish_other_sessions)
             menu.add(Menu.NONE, MENU_FINISH_ALL_SESSIONS, Menu.NONE, R.string.action_finish_all_sessions)
 
@@ -866,16 +900,12 @@ class TermuxTerminalSessionActivityClient(private val mActivity: TermuxActivity)
                         showScrollbackSearchDialog()
                         true
                     }
-                    MENU_NEW_FROM_TEMPLATE -> {
-                        showSessionTemplateDialog()
-                        true
-                    }
                     MENU_COMMAND_HISTORY -> {
                         showCommandHistoryDialog()
                         true
                     }
-                    MENU_NEW_SYSTEM_SESSION -> {
-                        addNewSession(false, null)
+                    MENU_NEW_FROM_TEMPLATE -> {
+                        showSessionTemplateDialog()
                         true
                     }
                     MENU_FINISH_OTHER_SESSIONS -> {
@@ -904,7 +934,6 @@ class TermuxTerminalSessionActivityClient(private val mActivity: TermuxActivity)
         private const val LOG_TAG = "TermuxTerminalSessionActivityClient"
 
         /** Menu item ids for the session list "More" popup menu. */
-        private const val MENU_NEW_SYSTEM_SESSION = 1
         private const val MENU_FINISH_OTHER_SESSIONS = 2
         private const val MENU_FINISH_ALL_SESSIONS = 3
         private const val MENU_SEARCH_SCROLLBACK = 4

@@ -5,4 +5,17 @@
     <color name="status_running_bg">#FF2E4A32</color>
     <color name="status_exited_text">#FFFFFFFF</color>
     <color name="status_exited_bg">#FF6B2B2B</color>
+
+    <!--
+      Session list. Deliberately muted: the list is a picker, not a dashboard, so the status marks should
+      be readable at a glance without competing with the session names for attention.
+
+      These are the light-theme values (the default). values-night overrides them, because a colour that
+      reads well on a dark dialog is washed out on a light one.
+    -->
+    <color name="status_muted">#FF606A72</color>
+    <color name="status_accent">#FF0F766E</color>
+    <color name="status_running">#FF15803D</color>
+    <color name="status_exited">#FFB91C1C</color>
+    <color name="status_row_current">#FFE6F4F1</color>
 </resources>
