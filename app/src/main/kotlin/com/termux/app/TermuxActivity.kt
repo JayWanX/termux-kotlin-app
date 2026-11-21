@@ -108,6 +108,15 @@ class TermuxActivity : AppCompatActivity(), ServiceConnection {
     /** Container the assistant panel is mounted into, created lazily. */
     private var aiPanelContainer: FrameLayout? = null
 
+    /** True when the side panel is narrow enough that labels should be abbreviated. */
+    private var aiPanelIsCompact: Boolean = false
+
+    /** Guard so the edge gesture listener is installed only once. */
+    private var assistantEdgeGestureInstalled: Boolean = false
+
+    private var assistantGestureStartX: Float = 0f
+    private var assistantGestureTracking: Boolean = false
+
     /** The [com.termux.view.TerminalViewClient] interface implementation. */
     var mTermuxTerminalViewClient: TermuxTerminalViewClient? = null
 
@@ -877,6 +886,7 @@ class TermuxActivity : AppCompatActivity(), ServiceConnection {
         if (terminalControlImpl == null) createTerminalControl()
         terminalControlImpl?.start()
         startStatusStrip()
+        installAssistantEdgeGesture()
 
         // Bind the optional assistant to the same terminal. This is the only coupling between the
         // terminal and the assistant; deleting the ai package turns it into a no-op.
@@ -986,6 +996,7 @@ class TermuxActivity : AppCompatActivity(), ServiceConnection {
                 lifecycleOwner = this,
                 container = container,
                 terminal = terminalControl,
+                compact = aiPanelIsCompact,
             )
             aiPanelController = created
             created
@@ -1002,37 +1013,26 @@ class TermuxActivity : AppCompatActivity(), ServiceConnection {
     private fun ensureAiPanelContainer(): FrameLayout {
         aiPanelContainer?.let { return it }
 
-        // The overlay must live in the relative layout so it covers the terminal.
-        //
-        // `generateLayoutParams(null)` is not usable here: RelativeLayout throws
-        // "You must supply a layout_width attribute" when handed an empty attribute set. Constructing
-        // the parent's own LayoutParams type directly is the safe way to get both a matching type and
-        // the required width/height.
+        // The panel is a side sheet, not a full-screen replacement: the assistant's purpose is to act on
+        // the terminal, so the terminal must stay visible while reading replies. A full-width overlay
+        // would force the user to close the panel to see what it did.
         val parent = findViewById<ViewGroup>(R.id.activity_termux_root_relative_layout)
             ?: findViewById<ViewGroup>(android.R.id.content)
             ?: error("no view group to host the assistant panel")
 
+        val width = assistantPanelWidth()
         val container = FrameLayout(this)
+
         val params: ViewGroup.LayoutParams = when (parent) {
             is android.widget.RelativeLayout ->
-                android.widget.RelativeLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                )
+                android.widget.RelativeLayout.LayoutParams(width, ViewGroup.LayoutParams.MATCH_PARENT)
+                    .apply { addRule(android.widget.RelativeLayout.ALIGN_PARENT_RIGHT) }
             is android.widget.LinearLayout ->
-                android.widget.LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                )
+                android.widget.LinearLayout.LayoutParams(width, ViewGroup.LayoutParams.MATCH_PARENT)
             is FrameLayout ->
-                FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                )
-            else -> ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT,
-            )
+                FrameLayout.LayoutParams(width, ViewGroup.LayoutParams.MATCH_PARENT)
+                    .apply { gravity = android.view.Gravity.END }
+            else -> ViewGroup.LayoutParams(width, ViewGroup.LayoutParams.MATCH_PARENT)
         }
         container.layoutParams = params
         container.visibility = View.GONE
@@ -1042,8 +1042,98 @@ class TermuxActivity : AppCompatActivity(), ServiceConnection {
 
         parent.addView(container)
         aiPanelContainer = container
+        aiPanelIsCompact = width < dp(320)
         return container
     }
+
+    /**
+     * Width of the side panel.
+     *
+     * The panel must stay beside the terminal rather than covering it, so the minimum is also clamped to
+     * a fraction of the screen: on a narrow phone a fixed 260dp minimum could otherwise take up most of
+     * the width and defeat the point of a side panel.
+     */
+    /**
+     * Width of the side panel.
+     *
+     * The panel must stay beside the terminal rather than covering it. A third of the screen keeps the
+     * terminal readable while leaving the panel wide enough for a short line of prose.
+     *
+     * The minimum is itself clamped to a fraction of the screen: on a narrow phone a fixed dp minimum
+     * could otherwise take up most of the width and defeat the point of a side panel.
+     */
+    private fun assistantPanelWidth(): Int {
+        val screenWidth = resources.displayMetrics.widthPixels
+        val target = (screenWidth * ASSISTANT_PANEL_WIDTH_FRACTION).toInt()
+        val minWidth = minOf(dp(240), (screenWidth * ASSISTANT_MAX_WIDTH_FRACTION).toInt())
+        val maxWidth = minOf(dp(400), screenWidth)
+        return target.coerceIn(minWidth, maxWidth)
+    }
+
+    /**
+     * Installs a swipe-from-the-edge gesture to open and close the assistant panel.
+     *
+     * The gesture is confined to a narrow strip along the right edge, and only when the assistant is
+     * actually available: a global swipe listener would compete with the terminal's own text selection
+     * and scrolling, which are the primary interactions in this app.
+     *
+     * Swiping left from the right edge opens the panel; swiping right on the panel closes it.
+     */
+    private fun installAssistantEdgeGesture() {
+        if (assistantEdgeGestureInstalled) return
+        val root = findViewById<ViewGroup>(R.id.activity_termux_root_relative_layout) ?: return
+        assistantEdgeGestureInstalled = true
+
+        val edgeWidth = dp(ASSISTANT_EDGE_GESTURE_WIDTH_DP)
+        val threshold = dp(ASSISTANT_EDGE_GESTURE_THRESHOLD_DP)
+
+        root.setOnTouchListener { view, event ->
+            // Only intercept near the right edge, so the rest of the terminal keeps its own gestures.
+            if (!com.termux.app.ai.AiConfig.get(this).isUsable()) return@setOnTouchListener false
+            val panelShown = aiPanelController?.isVisible() == true
+            if (!panelShown && event.x < view.width - edgeWidth) return@setOnTouchListener false
+
+            when (event.actionMasked) {
+                android.view.MotionEvent.ACTION_DOWN -> {
+                    assistantGestureStartX = event.x
+                    assistantGestureTracking = true
+                    false
+                }
+
+                android.view.MotionEvent.ACTION_UP -> {
+                    if (assistantGestureTracking) {
+                        assistantGestureTracking = false
+                        val delta = event.x - assistantGestureStartX
+                        when {
+                            // Swiping left towards the panel's edge opens it.
+                            !panelShown && delta < -threshold -> {
+                                toggleAssistantPanel()
+                                true
+                            }
+                            // Swiping right dismisses it.
+                            panelShown && delta > threshold -> {
+                                aiPanelController?.hide()
+                                true
+                            }
+                            else -> false
+                        }
+                    } else {
+                        false
+                    }
+                }
+
+                android.view.MotionEvent.ACTION_CANCEL -> {
+                    assistantGestureTracking = false
+                    false
+                }
+
+                else -> false
+            }
+        }
+    }
+
+    private fun dp(value: Int): Int =
+        (value * resources.displayMetrics.density).toInt()
 
     val preferences: TermuxAppSharedPreferences?
         get() = mPreferences
@@ -1141,6 +1231,28 @@ class TermuxActivity : AppCompatActivity(), ServiceConnection {
         private const val CONTEXT_MENU_HELP_ID = 7
         private const val CONTEXT_MENU_SETTINGS_ID = 8
         private const val CONTEXT_MENU_ASSISTANT_ID = 9
+
+        /**
+         * Side panel width as a fraction of the screen.
+         *
+         * Deliberately well under half: the point of the panel is to sit beside the terminal, not to
+         * cover it.
+         */
+        private const val ASSISTANT_PANEL_WIDTH_FRACTION = 0.34f
+
+        /**
+         * Upper bound on the panel's minimum width, as a fraction of the screen.
+         *
+         * Without this a 240dp minimum on a high-density phone resolves to more than half the screen,
+         * which would turn the side panel back into a full-screen cover.
+         */
+        private const val ASSISTANT_MAX_WIDTH_FRACTION = 0.36f
+
+        /** Width of the right-edge strip that accepts the open gesture. */
+        private const val ASSISTANT_EDGE_GESTURE_WIDTH_DP = 24
+
+        /** Horizontal distance that counts as a deliberate swipe. */
+        private const val ASSISTANT_EDGE_GESTURE_THRESHOLD_DP = 40
 
         private const val ARG_TERMINAL_TOOLBAR_TEXT_INPUT = "terminal_toolbar_text_input"
         private const val ARG_ACTIVITY_RECREATED = "activity_recreated"
