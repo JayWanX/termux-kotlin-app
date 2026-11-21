@@ -30,10 +30,20 @@ jobs:
         run: chmod +x gradlew
 
       - name: Run tests with coverage
-        run: ./gradlew testDebugUnitTest jacocoTestReport --no-daemon
-        continue-on-error: true
+        # No continue-on-error: a failing test must fail this job. It previously swallowed test
+        # failures, so for as long as this workflow existed a red suite still reported green — which
+        # is how the broken `~/sub/path` sandbox expansion stayed hidden.
+        #
+        # The task is module-qualified: `jacocoTestReport` is registered by :app only. Running it at the
+        # root is what produced "Task 'jacocoTestReport' not found", a failure this workflow had been
+        # hiding behind continue-on-error since it was written; no coverage was ever collected.
+        run: ./gradlew :app:testDebugUnitTest :app:jacocoTestReport --no-daemon
 
+      # The uploads still run when the tests fail, so a failing run keeps whatever coverage was
+      # produced instead of discarding it. Failing the job and reporting coverage are not in conflict:
+      # `if: always()` decouples them, which is what continue-on-error was wrongly being used for.
       - name: Upload coverage to Codecov
+        if: always()
         uses: codecov/codecov-action@v5
         with:
           files: '**/build/reports/jacoco/**/*.xml'
@@ -43,8 +53,8 @@ jobs:
           verbose: true
 
       - name: Upload coverage reports
-        uses: actions/upload-artifact@v6
         if: always()
+        uses: actions/upload-artifact@v6
         with:
           name: coverage-reports
           path: '**/build/reports/jacoco/**'

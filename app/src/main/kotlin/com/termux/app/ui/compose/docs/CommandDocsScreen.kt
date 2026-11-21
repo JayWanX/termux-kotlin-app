@@ -416,7 +416,7 @@ private fun CodeBlockView(code: String) {
         }
     }
 
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 6.dp)
@@ -427,19 +427,35 @@ private fun CodeBlockView(code: String) {
                 RoundedCornerShape(12.dp)
             )
     ) {
+        // The copy button floats in the corner instead of occupying a row of its own. A dedicated row
+        // added 32dp of empty space above every snippet, which on a page of examples pushed the code
+        // itself off screen for no gain: the button belongs to the block, not above it.
+        Text(
+            text = code,
+            style = MaterialTheme.typography.bodySmall.copy(
+                fontFamily = FontFamily.Monospace,
+                lineHeight = 19.sp
+            ),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(start = 14.dp, end = 44.dp, top = 10.dp, bottom = 12.dp)
+        )
+
         Row(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 14.dp, end = 6.dp, top = 4.dp),
-            horizontalArrangement = Arrangement.End,
+                .align(Alignment.TopEnd)
+                .padding(end = 4.dp, top = 2.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                text = if (copied) "Copied" else "",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.primary
-            )
-            Spacer(modifier = Modifier.width(4.dp))
+            // The acknowledgement appears only briefly, and the code reserves 44dp on the right, so the
+            // label never sits on top of a full line of text.
+            if (copied) {
+                Text(
+                    text = "Copied",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(end = 4.dp)
+                )
+            }
             IconButton(
                 onClick = {
                     clipboard.setText(AnnotatedString(code))
@@ -455,16 +471,6 @@ private fun CodeBlockView(code: String) {
                 )
             }
         }
-
-        Text(
-            text = code,
-            style = MaterialTheme.typography.bodySmall.copy(
-                fontFamily = FontFamily.Monospace,
-                lineHeight = 19.sp
-            ),
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(start = 14.dp, end = 14.dp, top = 2.dp, bottom = 12.dp)
-        )
     }
 }
 

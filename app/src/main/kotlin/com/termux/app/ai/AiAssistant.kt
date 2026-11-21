@@ -47,7 +47,7 @@ object AiAssistant {
         return AgentSession(
             config = current.config,
             loop = AgentLoop(
-                client = OpenAiClient(current.config),
+                streamingClient = StreamingChatClient(current.config),
                 // Terminal tools first: they are the primary interface. File tools follow, because
                 // editing files is a common follow-up to reading terminal output.
                 registry = ToolRegistry(TerminalTools.all() + FileTools.all()),

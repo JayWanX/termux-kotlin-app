@@ -11,7 +11,6 @@ import android.text.TextUtils
 import android.view.ContextThemeWrapper
 import android.view.Menu
 import android.view.View
-import android.widget.ArrayAdapter
 import android.widget.ListView
 import android.widget.PopupMenu
 import com.termux.R
@@ -26,6 +25,8 @@ import com.termux.shared.termux.settings.properties.TermuxPropertyConstants
 import com.termux.shared.termux.shell.command.runner.terminal.TermuxSession
 import com.termux.shared.termux.terminal.TermuxTerminalSessionClientBase
 import com.termux.shared.termux.terminal.io.BellHandler
+import com.termux.shared.terminal.SessionInfo
+import com.termux.shared.terminal.TerminalState
 import com.termux.terminal.TerminalColors
 import com.termux.terminal.TerminalSession
 import com.termux.terminal.TextStyle
@@ -41,7 +42,7 @@ class TermuxTerminalSessionActivityClient(private val mActivity: TermuxActivity)
 
     /** The currently shown session list dialog, if any. Used to refresh it live. */
     private var mSessionListDialog: AlertDialog? = null
-    private var mSessionListAdapter: ArrayAdapter<String>? = null
+    private var mSessionListAdapter: SessionListAdapter? = null
 
     /**
      * Should be called when mActivity.onCreate() is called
@@ -443,51 +444,55 @@ class TermuxTerminalSessionActivityClient(private val mActivity: TermuxActivity)
     }
 
     /**
-     * Build the display labels for all running sessions.
+     * Builds the rows shown in the session list.
      *
      * Each row carries the session's live state and working directory, so the list doubles as a health
-     * view: a dead session or one stuck in a directory is visible without switching to it.
+     * view: a dead session, or one stuck in an unexpected directory, is visible without switching to it.
      */
-    private fun buildSessionLabels(service: TermuxService): ArrayList<String> {
-        val sessions = ArrayList<String>()
-        val sessionCount = service.termuxSessionsSize
+    private fun buildSessionRows(service: TermuxService): List<SessionRow> {
+        val count = service.termuxSessionsSize
+        val infos = ArrayList<SessionInfo>(count)
+        val names = ArrayList<String?>(count)
 
         // terminalControl is created during onResume; the session dialog can be opened before that on a
         // cold start, so the lookup degrades rather than throwing.
-        val infos = if (mActivity.hasTerminalControl) {
+        val live = if (mActivity.hasTerminalControl) {
             runCatching { mActivity.terminalControl.sessions().associateBy { it.id } }
                 .getOrDefault(emptyMap())
         } else {
             emptyMap()
         }
 
-        for (i in 0 until sessionCount) {
+        for (i in 0 until count) {
             val termuxSession = service.getTermuxSession(i) ?: continue
             val terminalSession = termuxSession.terminalSession
-            val sessionId = terminalSession.mSessionName ?: terminalSession.getPid().toString()
-            val info = infos[sessionId]
+            names.add(terminalSession.mSessionName)
 
-            val label = if (info != null) {
-                SessionLabelFormatter.format(
-                    index = i + 1,
-                    info = info,
-                    name = terminalSession.mSessionName,
-                    title = terminalSession.title,
-                )
-            } else {
-                // Fall back to the previous plain label if the state snapshot is unavailable.
-                val name = terminalSession.mSessionName
-                val head = if (TextUtils.isEmpty(name)) "Session [${i + 1}]" else "$name [${i + 1}]"
-                val processTitle = terminalSession.title
-                if (!processTitle.isNullOrEmpty() && processTitle != name) {
-                    "$head $processTitle"
-                } else {
-                    head
-                }
-            }
-            sessions.add(label)
+            val id = terminalSession.mSessionName ?: terminalSession.getPid().toString()
+            infos.add(
+                live[id] ?: SessionInfo(
+                    id = id,
+                    title = terminalSession.title.orEmpty(),
+                    pid = terminalSession.getPid(),
+                    isRunning = terminalSession.isRunning,
+                    exitStatus = null,
+                    cwd = null,
+                    isAltBuffer = false,
+                    // Without a live snapshot the best available answer is liveness alone.
+                    state = if (terminalSession.isRunning) {
+                        TerminalState.Idle(0L)
+                    } else {
+                        TerminalState.Dead(null)
+                    },
+                ),
+            )
         }
-        return sessions
+
+        return SessionRowBuilder.build(
+            sessions = infos,
+            names = names,
+            currentIndex = service.getIndexOfSession(mActivity.currentSession),
+        )
     }
 
     /**
@@ -496,20 +501,14 @@ class TermuxTerminalSessionActivityClient(private val mActivity: TermuxActivity)
     fun showSessionListDialog() {
         val service = mActivity.termuxService ?: return
 
-        // Use a plain ListView adapter instead of setSingleChoiceItems so that
-        // item long presses can be handled (to rename a session in place).
-        val listAdapter = ArrayAdapter(
-            mActivity,
-            android.R.layout.simple_list_item_single_choice,
-            buildSessionLabels(service)
-        )
+        // A custom adapter replaces the old joined-text rows; long press still renames a session in place.
+        val listAdapter = SessionListAdapter(mActivity)
+        listAdapter.submit(buildSessionRows(service))
         mSessionListAdapter = listAdapter
 
         val dialog = AlertDialog.Builder(mActivity)
             .setTitle(R.string.title_session_list)
-            .setAdapter(
-                listAdapter
-            ) { d, which ->
+            .setAdapter(listAdapter) { d, which ->
                 switchToSession(which)
                 d.dismiss()
             }
@@ -560,17 +559,15 @@ class TermuxTerminalSessionActivityClient(private val mActivity: TermuxActivity)
     private fun refreshSessionListDialog(
         dialog: AlertDialog,
         service: TermuxService,
-        listAdapter: ArrayAdapter<String>
+        listAdapter: SessionListAdapter,
     ) {
-        val labels = buildSessionLabels(service)
-        listAdapter.clear()
-        listAdapter.addAll(labels)
-        listAdapter.notifyDataSetChanged()
+        val rows = buildSessionRows(service)
+        listAdapter.submit(rows)
 
         val currentIndex = service.getIndexOfSession(mActivity.currentSession)
         dialog.listView?.let { listView ->
             listView.choiceMode = ListView.CHOICE_MODE_SINGLE
-            if (currentIndex in labels.indices) {
+            if (currentIndex in rows.indices) {
                 listView.setItemChecked(currentIndex, true)
             } else {
                 listView.clearChoices()
