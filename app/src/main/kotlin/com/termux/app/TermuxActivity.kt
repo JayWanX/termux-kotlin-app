@@ -409,6 +409,47 @@ class TermuxActivity : AppCompatActivity(), ServiceConnection {
         terminalToolbarViewPager.layoutParams = layoutParams
     }
 
+    /**
+     * The text input page grows with its content between a minimum and a
+     * maximum height, so a single line takes little space while several lines
+     * stay fully visible.
+     *
+     * @param textInputHeightPx the measured content height, or 0 to use the
+     *        page's minimum height.
+     */
+    fun updateTerminalToolbarHeightForPage(page: Int, textInputHeightPx: Int = 0) {
+        val terminalToolbarViewPager = terminalToolbarViewPager ?: return
+
+        // Bail out until the default row height has been measured, otherwise
+        // the computed bounds would all be zero.
+        if (mTerminalToolbarDefaultHeight <= 0f) return
+
+        val layoutParams = terminalToolbarViewPager.layoutParams
+        val scaleFactor = mProperties?.getTerminalToolbarHeightScaleFactor() ?: 1f
+        val rowHeight = mTerminalToolbarDefaultHeight * scaleFactor
+
+        val newHeight = if (page == 1) {
+            val minHeight = (rowHeight * TEXT_INPUT_MIN_ROWS).toInt()
+            val maxHeight = (rowHeight * TEXT_INPUT_MAX_ROWS).toInt()
+            when {
+                textInputHeightPx <= 0 -> minHeight
+                textInputHeightPx < minHeight -> minHeight
+                textInputHeightPx > maxHeight -> maxHeight
+                else -> textInputHeightPx
+            }
+        } else {
+            val extraKeysInfo = mTermuxTerminalExtraKeys?.getExtraKeysInfo()
+            val matrix = extraKeysInfo?.getMatrix()
+            Math.round(rowHeight * (matrix?.size ?: 0)).toInt()
+        }
+
+        // Avoid redundant layout passes when the height does not change.
+        if (layoutParams.height == newHeight) return
+
+        layoutParams.height = newHeight
+        terminalToolbarViewPager.layoutParams = layoutParams
+    }
+
     fun toggleTerminalToolbar() {
         val terminalToolbarViewPager = terminalToolbarViewPager ?: return
 
@@ -789,6 +830,10 @@ class TermuxActivity : AppCompatActivity(), ServiceConnection {
 
         private const val ARG_TERMINAL_TOOLBAR_TEXT_INPUT = "terminal_toolbar_text_input"
         private const val ARG_ACTIVITY_RECREATED = "activity_recreated"
+
+        /** Minimum/maximum height of the text input page, in toolbar rows. */
+        private const val TEXT_INPUT_MIN_ROWS = 1.2f
+        private const val TEXT_INPUT_MAX_ROWS = 5f
 
         private const val LOG_TAG = "TermuxActivity"
 
