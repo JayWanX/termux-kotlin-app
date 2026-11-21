@@ -10,6 +10,7 @@ import androidx.compose.runtime.Composable
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.termux.app.ui.compose.theme.TermuxTheme
 import dagger.hilt.android.AndroidEntryPoint
 
 /**
@@ -89,39 +90,19 @@ sealed class SettingsDestination(val route: String) {
 
 /**
  * Termux Settings Material 3 theme.
+ *
+ * Delegates to the shared [TermuxTheme] so settings screens use exactly the same
+ * palette as the styling screen and the XML themed activities.
  */
 @Composable
 fun TermuxSettingsTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
-    dynamicColor: Boolean = true,
+    dynamicColor: Boolean = false,
     content: @Composable () -> Unit
 ) {
-    val colorScheme = when {
-        dynamicColor && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S -> {
-            val context = androidx.compose.ui.platform.LocalContext.current
-            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-        }
-        darkTheme -> darkColorScheme(
-            primary = androidx.compose.ui.graphics.Color(0xFF4ade80),
-            onPrimary = androidx.compose.ui.graphics.Color(0xFF1a1a2e),
-            primaryContainer = androidx.compose.ui.graphics.Color(0xFF1a3a2e),
-            onPrimaryContainer = androidx.compose.ui.graphics.Color(0xFF4ade80),
-            secondary = androidx.compose.ui.graphics.Color(0xFF3498db),
-            background = androidx.compose.ui.graphics.Color(0xFF1a1a2e),
-            surface = androidx.compose.ui.graphics.Color(0xFF1a1a2e),
-            surfaceVariant = androidx.compose.ui.graphics.Color(0xFF2a2a3e)
-        )
-        else -> lightColorScheme(
-            primary = androidx.compose.ui.graphics.Color(0xFF2ecc71),
-            onPrimary = androidx.compose.ui.graphics.Color.White,
-            primaryContainer = androidx.compose.ui.graphics.Color(0xFFd4f5e0),
-            onPrimaryContainer = androidx.compose.ui.graphics.Color(0xFF1a3a2e)
-        )
-    }
-    
-    MaterialTheme(
-        colorScheme = colorScheme,
-        typography = Typography(),
+    TermuxTheme(
+        darkTheme = darkTheme,
+        dynamicColor = dynamicColor,
         content = content
     )
 }

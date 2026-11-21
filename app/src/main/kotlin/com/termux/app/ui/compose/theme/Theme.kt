@@ -15,39 +15,59 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 
-// Termux brand colors
-private val TermuxGreen = Color(0xFF33B5E5)
-private val TermuxDark = Color(0xFF1C1C1C)
-private val TermuxBlack = Color(0xFF000000)
-private val TermuxWhite = Color(0xFFFFFFFF)
-private val TermuxGray = Color(0xFF2A2A2A)
+// Modern neutral palette shared with the XML themes so that Compose screens
+// (settings, styling, dialogs) match the rest of the app.
+private val AccentTeal = Color(0xFF2DD4BF)
+private val AccentTealDark = Color(0xFF0F766E)
+private val SurfaceDark = Color(0xFF0E1013)
+private val SurfaceContainerDark = Color(0xFF191C20)
+private val SurfaceLight = Color(0xFFF8FAFA)
+private val SurfaceContainerLight = Color(0xFFFFFFFF)
+private val OnSurfaceDark = Color(0xFFE4E7EA)
+private val OnSurfaceLight = Color(0xFF1A1C1E)
+private val OnSurfaceMutedDark = Color(0xFF9AA4AE)
+private val OnSurfaceMutedLight = Color(0xFF606A72)
+private val DividerDark = Color(0xFF262B31)
+private val DividerLight = Color(0xFFE4E8EB)
 
 private val DarkColorScheme = darkColorScheme(
-    primary = TermuxGreen,
-    secondary = Color(0xFF03DAC6),
-    tertiary = Color(0xFF3700B3),
-    background = TermuxBlack,
-    surface = TermuxDark,
-    surfaceVariant = TermuxGray,
-    onPrimary = TermuxBlack,
-    onSecondary = TermuxBlack,
-    onTertiary = TermuxWhite,
-    onBackground = TermuxWhite,
-    onSurface = TermuxWhite,
-    onSurfaceVariant = Color(0xFFCACACA)
+    primary = AccentTeal,
+    onPrimary = Color(0xFF00201C),
+    primaryContainer = Color(0xFF134E4A),
+    onPrimaryContainer = Color(0xFFCCFBF1),
+    secondary = Color(0xFF8E9BA8),
+    onSecondary = Color(0xFF11161A),
+    tertiary = AccentTeal,
+    background = SurfaceDark,
+    onBackground = OnSurfaceDark,
+    surface = SurfaceContainerDark,
+    onSurface = OnSurfaceDark,
+    surfaceVariant = Color(0xFF1F242A),
+    onSurfaceVariant = OnSurfaceMutedDark,
+    outline = DividerDark,
+    outlineVariant = DividerDark,
+    error = Color(0xFFF87171),
+    onError = Color(0xFF2A0A0A)
 )
 
 private val LightColorScheme = lightColorScheme(
-    primary = Color(0xFF0077B5),
-    secondary = Color(0xFF018786),
-    tertiary = Color(0xFF6200EE),
-    background = Color(0xFFFFFBFE),
-    surface = Color(0xFFFFFBFE),
+    primary = AccentTealDark,
     onPrimary = Color.White,
+    primaryContainer = Color(0xFFCCFBF1),
+    onPrimaryContainer = Color(0xFF042F2E),
+    secondary = Color(0xFF4B5563),
     onSecondary = Color.White,
-    onTertiary = Color.White,
-    onBackground = Color(0xFF1C1B1F),
-    onSurface = Color(0xFF1C1B1F),
+    tertiary = AccentTealDark,
+    background = SurfaceLight,
+    onBackground = OnSurfaceLight,
+    surface = SurfaceContainerLight,
+    onSurface = OnSurfaceLight,
+    surfaceVariant = Color(0xFFEFF2F4),
+    onSurfaceVariant = OnSurfaceMutedLight,
+    outline = DividerLight,
+    outlineVariant = DividerLight,
+    error = Color(0xFFB91C1C),
+    onError = Color.White
 )
 
 @Composable
@@ -69,8 +89,13 @@ fun TermuxTheme(
     if (!view.isInEditMode) {
         SideEffect {
             val window = (view.context as Activity).window
+            // Match the status bar to the neutral surface so Compose screens
+            // share the same chrome as the XML themed screens.
             window.statusBarColor = colorScheme.background.toArgb()
-            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !darkTheme
+            WindowCompat.getInsetsController(window, view).apply {
+                isAppearanceLightStatusBars = !darkTheme
+                isAppearanceLightNavigationBars = !darkTheme
+            }
         }
     }
 

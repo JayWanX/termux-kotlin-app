@@ -23,6 +23,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.termux.app.ui.compose.theme.TermuxTheme
 import com.termux.shared.logger.Logger
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
@@ -83,9 +84,9 @@ fun StylingScreen(
         currentSettings = stylingManager.getCurrentSettings()
     }
     
-    MaterialTheme(
-        colorScheme = darkColorScheme()
-    ) {
+    // Use the shared app theme so this screen follows the same modern palette
+    // and day/night behaviour as the rest of the app.
+    TermuxTheme {
         Scaffold(
             topBar = {
                 TopAppBar(

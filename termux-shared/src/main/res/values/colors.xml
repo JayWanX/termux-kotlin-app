@@ -9,6 +9,33 @@
     <color name="red_400">#FF0000</color>
     <color name="red_800">#C4001D</color>
 
+    <!-- Modern neutral chrome palette.
+         App bars and status bars use near-black neutral surfaces rather than a
+         saturated brand colour; a restrained teal accent is reserved for
+         interactive elements (buttons, selected items, links, switches). -->
+    <color name="brand_accent_light">#FF0F766E</color>
+    <color name="brand_accent_light_variant">#FF115E59</color>
+    <color name="brand_accent_dark">#FF2DD4BF</color>
+    <color name="brand_accent_dark_variant">#FF14B8A6</color>
+
+    <!-- App bar / status bar surfaces (neutral, not tinted). -->
+    <color name="appbar_light">#FFFFFFFF</color>
+    <color name="appbar_light_variant">#FFFFFFFF</color>
+    <color name="appbar_dark">#FF16181C</color>
+    <color name="appbar_dark_variant">#FF16181C</color>
+
+    <!-- Neutral surfaces used by the app chrome. -->
+    <color name="surface_light">#FFF8FAFA</color>
+    <color name="surface_dark">#FF0E1013</color>
+    <color name="surface_container_light">#FFFFFFFF</color>
+    <color name="surface_container_dark">#FF191C20</color>
+    <color name="on_surface_light">#FF1A1C1E</color>
+    <color name="on_surface_dark">#FFE4E7EA</color>
+    <color name="on_surface_muted_light">#FF606A72</color>
+    <color name="on_surface_muted_dark">#FF9AA4AE</color>
+    <color name="divider_light">#FFE4E8EB</color>
+    <color name="divider_dark">#FF262B31</color>
+
     <color name="grey_200">#EEEEEE</color>
     <color name="grey_400">#BDBDBD</color>
     <color name="grey_500">#9E9E9E</color>

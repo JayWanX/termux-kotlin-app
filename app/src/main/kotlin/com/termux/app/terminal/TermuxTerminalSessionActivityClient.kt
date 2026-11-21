@@ -6,6 +6,7 @@ import android.graphics.Typeface
 import android.media.AudioAttributes
 import android.media.SoundPool
 import android.text.TextUtils
+import android.view.ContextThemeWrapper
 import android.view.Menu
 import android.view.View
 import android.widget.ArrayAdapter
@@ -561,7 +562,13 @@ class TermuxTerminalSessionActivityClient(private val mActivity: TermuxActivity)
         val service = mActivity.termuxService ?: return
         val currentSession = mActivity.currentSession
 
-        PopupMenu(mActivity, anchor).apply {
+        // Wrap the context in an AppCompat popup theme so the popup shares the
+        // app's DayNight styling instead of the platform default look.
+        val themedContext = ContextThemeWrapper(
+            mActivity, androidx.appcompat.R.style.ThemeOverlay_AppCompat_DayNight
+        )
+
+        PopupMenu(themedContext, anchor).apply {
             menu.add(Menu.NONE, MENU_NEW_SYSTEM_SESSION, Menu.NONE, R.string.action_new_system_session)
             menu.add(Menu.NONE, MENU_FINISH_OTHER_SESSIONS, Menu.NONE, R.string.action_finish_other_sessions)
             menu.add(Menu.NONE, MENU_FINISH_ALL_SESSIONS, Menu.NONE, R.string.action_finish_all_sessions)

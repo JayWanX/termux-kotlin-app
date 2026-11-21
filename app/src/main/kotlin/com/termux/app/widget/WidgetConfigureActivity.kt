@@ -18,6 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.termux.app.ui.compose.theme.TermuxTheme
 import com.termux.shared.logger.Logger
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
@@ -65,15 +66,17 @@ class WidgetConfigureActivity : ComponentActivity() {
         shortcutScanner.ensureDirectories()
         
         setContent {
-            WidgetConfigureScreen(
-                shortcutScanner = shortcutScanner,
-                widgetPreferences = widgetPreferences,
-                widgetId = appWidgetId,
-                onConfigComplete = { config ->
-                    completeConfiguration(config)
-                },
-                onCancel = { finish() }
-            )
+            TermuxTheme {
+                WidgetConfigureScreen(
+                    shortcutScanner = shortcutScanner,
+                    widgetPreferences = widgetPreferences,
+                    widgetId = appWidgetId,
+                    onConfigComplete = { config ->
+                        completeConfiguration(config)
+                    },
+                    onCancel = { finish() }
+                )
+            }
         }
     }
     

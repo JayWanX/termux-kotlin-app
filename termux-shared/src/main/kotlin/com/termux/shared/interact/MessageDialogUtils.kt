@@ -3,12 +3,9 @@ package com.termux.shared.interact
 import android.app.AlertDialog
 import android.content.Context
 import android.content.DialogInterface
-import android.graphics.Color
 import android.view.LayoutInflater
-import android.widget.Button
 import android.widget.TextView
 import com.termux.shared.R
-import com.termux.shared.logger.Logger
 
 object MessageDialogUtils {
 
@@ -68,9 +65,15 @@ object MessageDialogUtils {
         onNegativeButton: DialogInterface.OnClickListener?,
         onDismiss: DialogInterface.OnDismissListener?
     ) {
-        val builder = AlertDialog.Builder(context, androidx.appcompat.R.style.Theme_AppCompat_Light_Dialog)
+        // Use an AppCompat DayNight dialog theme so the dialog follows the system
+        // light/dark setting instead of always rendering a light dialog.
+        val dialogTheme = androidx.appcompat.R.style.Theme_AppCompat_DayNight_Dialog_Alert
+        val builder = AlertDialog.Builder(context, dialogTheme)
 
-        val inflater = context.getSystemService(Context.LAYOUT_INFLATER_SERVICE) as LayoutInflater
+        // Inflate with the same dialog theme so theme attributes used by the
+        // layout (e.g. ?attr/colorOnSurface) resolve correctly.
+        val themedContext = android.view.ContextThemeWrapper(context, dialogTheme)
+        val inflater = themedContext.getSystemService(Context.LAYOUT_INFLATER_SERVICE) as LayoutInflater
         val view = inflater.inflate(R.layout.dialog_show_message, null)
         if (view != null) {
             builder.setView(view)
@@ -95,14 +98,8 @@ object MessageDialogUtils {
 
         val dialog = builder.create()
 
-        dialog.setOnShowListener {
-            Logger.logError("dialog")
-            var button: Button? = dialog.getButton(AlertDialog.BUTTON_POSITIVE)
-            button?.setTextColor(Color.BLACK)
-            button = dialog.getButton(AlertDialog.BUTTON_NEGATIVE)
-            button?.setTextColor(Color.BLACK)
-        }
-
+        // Let the dialog theme decide the button colours so they stay readable
+        // in both light and dark mode.
         dialog.show()
     }
 
