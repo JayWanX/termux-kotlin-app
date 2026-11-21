@@ -36,6 +36,10 @@ class TermuxTerminalSessionActivityClient(private val mActivity: TermuxActivity)
     private var mBellSoundPool: SoundPool? = null
     private var mBellSoundId: Int = 0
 
+    /** The currently shown session list dialog, if any. Used to refresh it live. */
+    private var mSessionListDialog: AlertDialog? = null
+    private var mSessionListAdapter: ArrayAdapter<String>? = null
+
     /**
      * Should be called when mActivity.onCreate() is called
      */
@@ -124,7 +128,12 @@ class TermuxTerminalSessionActivityClient(private val mActivity: TermuxActivity)
                 removeFinishedSession(finishedSession)
             }
         } else {
-            if (finishedSession.exitStatus == 0 || finishedSession.exitStatus == 130 || isPluginExecutionCommandWithPendingResult) {
+            // Remove the finished session right away unless it is the only
+            // session left, which is the current one. In that case keep it so
+            // the user can still read the final output before pressing Enter.
+            val isOnlySession = service.termuxSessionsSize <= 1
+            val isCurrentSession = finishedSession === mActivity.currentSession
+            if (!(isOnlySession && isCurrentSession) || isPluginExecutionCommandWithPendingResult) {
                 removeFinishedSession(finishedSession)
             }
         }
@@ -356,6 +365,14 @@ class TermuxTerminalSessionActivityClient(private val mActivity: TermuxActivity)
 
     fun termuxSessionListNotifyUpdated() {
         mActivity.termuxSessionListNotifyUpdated()
+
+        // Keep the session list dialog in sync while it is open.
+        val dialog = mSessionListDialog
+        val adapter = mSessionListAdapter
+        val service = mActivity.termuxService
+        if (dialog != null && dialog.isShowing && adapter != null && service != null) {
+            refreshSessionListDialog(dialog, service, adapter)
+        }
     }
 
     fun toToastTitle(session: TerminalSession?): String? {
@@ -413,11 +430,9 @@ class TermuxTerminalSessionActivityClient(private val mActivity: TermuxActivity)
     }
 
     /**
-     * Show a dialog listing all running sessions so the user can switch between them
+     * Build the display labels for all running sessions.
      */
-    fun showSessionListDialog() {
-        val service = mActivity.termuxService ?: return
-
+    private fun buildSessionLabels(service: TermuxService): ArrayList<String> {
         val sessions = ArrayList<String>()
         val sessionCount = service.termuxSessionsSize
         for (i in 0 until sessionCount) {
@@ -433,16 +448,23 @@ class TermuxTerminalSessionActivityClient(private val mActivity: TermuxActivity)
             }
             sessions.add(label.joinToString(" "))
         }
+        return sessions
+    }
 
-        val currentIndex = service.getIndexOfSession(mActivity.currentSession)
+    /**
+     * Show a dialog listing all running sessions so the user can switch between them
+     */
+    fun showSessionListDialog() {
+        val service = mActivity.termuxService ?: return
 
         // Use a plain ListView adapter instead of setSingleChoiceItems so that
         // item long presses can be handled (to rename a session in place).
         val listAdapter = ArrayAdapter(
             mActivity,
             android.R.layout.simple_list_item_single_choice,
-            sessions
+            buildSessionLabels(service)
         )
+        mSessionListAdapter = listAdapter
 
         val dialog = AlertDialog.Builder(mActivity)
             .setTitle(R.string.title_session_list)
@@ -470,9 +492,6 @@ class TermuxTerminalSessionActivityClient(private val mActivity: TermuxActivity)
             // Mark the current session as the checked item.
             dialog.listView?.apply {
                 choiceMode = ListView.CHOICE_MODE_SINGLE
-                if (currentIndex in sessions.indices) {
-                    setItemChecked(currentIndex, true)
-                }
                 setOnItemLongClickListener { _, _, position, _ ->
                     val termuxSession = service.getTermuxSession(position)
                         ?: return@setOnItemLongClickListener false
@@ -480,9 +499,44 @@ class TermuxTerminalSessionActivityClient(private val mActivity: TermuxActivity)
                     true
                 }
             }
+
+            refreshSessionListDialog(dialog, service, listAdapter)
+        }
+
+        mSessionListDialog = dialog
+
+        dialog.setOnDismissListener {
+            if (mSessionListDialog === dialog) {
+                mSessionListDialog = null
+                mSessionListAdapter = null
+            }
         }
 
         dialog.show()
+    }
+
+    /**
+     * Rebuild the session list dialog contents in place, keeping the dialog open.
+     */
+    private fun refreshSessionListDialog(
+        dialog: AlertDialog,
+        service: TermuxService,
+        listAdapter: ArrayAdapter<String>
+    ) {
+        val labels = buildSessionLabels(service)
+        listAdapter.clear()
+        listAdapter.addAll(labels)
+        listAdapter.notifyDataSetChanged()
+
+        val currentIndex = service.getIndexOfSession(mActivity.currentSession)
+        dialog.listView?.let { listView ->
+            listView.choiceMode = ListView.CHOICE_MODE_SINGLE
+            if (currentIndex in labels.indices) {
+                listView.setItemChecked(currentIndex, true)
+            } else {
+                listView.clearChoices()
+            }
+        }
     }
 
     /**

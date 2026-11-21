@@ -97,6 +97,12 @@ class TermuxTerminalViewClient(
     fun onReloadActivityStyling() {
         setSoftKeyboardState(false, true)
         setTerminalCursorBlinkerState(true)
+
+        // Re-apply the cursor style from termux.properties so that a changed
+        // cursor shape takes effect without restarting the session.
+        val emulator = mActivity.terminalView.mEmulator
+        emulator?.setCursorStyle()
+        mActivity.terminalView.onScreenUpdated()
     }
 
     /**
@@ -490,16 +496,23 @@ class TermuxTerminalViewClient(
     }
 
     fun shareSessionTranscript() {
-        val session = mActivity.currentSession ?: return
+        // Share only the text that was selected when this action was invoked.
+        // The selected text is captured by TextSelectionCursorController before
+        // selection mode is stopped.
+        var selectedText = mActivity.terminalView.storedSelectedText
+        if (DataUtils.isNullOrEmpty(selectedText)) {
+            // Fall back to the current transcript if nothing was selected.
+            val session = mActivity.currentSession ?: return
+            selectedText = ShellUtils.getTerminalSessionTranscriptText(session, false, true) ?: return
+        }
 
-        var transcriptText = ShellUtils.getTerminalSessionTranscriptText(session, false, true) ?: return
-
-        transcriptText = DataUtils.getTruncatedCommandOutput(
-            transcriptText, DataUtils.TRANSACTION_SIZE_LIMIT_IN_BYTES, false, true, false
+        val text = DataUtils.getTruncatedCommandOutput(
+            selectedText, DataUtils.TRANSACTION_SIZE_LIMIT_IN_BYTES, false, true, false
         )?.trim() ?: return
+
         ShareUtils.shareText(
             mActivity, mActivity.getString(R.string.title_share_transcript),
-            transcriptText, mActivity.getString(R.string.title_share_transcript_with)
+            text, mActivity.getString(R.string.title_share_transcript_with)
         )
     }
 

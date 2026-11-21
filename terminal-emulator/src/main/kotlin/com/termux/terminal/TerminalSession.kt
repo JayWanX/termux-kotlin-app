@@ -201,7 +201,14 @@ class TerminalSession(
 
     /** Reset state for terminal emulator state. */
     fun reset() {
-        mEmulator?.reset()
+        val emulator = mEmulator ?: return
+        // Reset the emulator's internal parser/margin/colour state.
+        emulator.reset()
+        // Clear the scrollback transcript and the screen so the reset is
+        // actually visible to the user, then home the cursor.
+        emulator.getScreen().clearTranscript()
+        val clearSequence = "\u001b[2J\u001b[3J\u001b[H".toByteArray(Charsets.UTF_8)
+        emulator.append(clearSequence, clearSequence.size)
         notifyScreenUpdate()
     }
 

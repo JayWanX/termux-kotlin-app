@@ -1,6 +1,7 @@
 package com.termux.app.styling
 
 import android.content.Context
+import android.content.Intent
 import android.graphics.Typeface
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
@@ -10,6 +11,8 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.termux.shared.logger.Logger
+import com.termux.shared.termux.TermuxConstants
+import com.termux.shared.termux.settings.properties.TermuxPropertyConstants as PropertyConstants
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -117,6 +120,13 @@ class StylingManager @Inject constructor(
         // Load saved font
         val fontName = dataStore.data.first()[KEY_CURRENT_FONT] ?: FontManager.DEFAULT_FONT_NAME
         _currentFont = fontManager.loadFont(fontName)
+
+        // Keep termux.properties in sync with the saved cursor style so the
+        // terminal renders the shape the user selected in Style settings.
+        val savedCursorStyle = dataStore.data.first()[KEY_CURSOR_STYLE]
+        if (!savedCursorStyle.isNullOrEmpty()) {
+            writeTerminalPropertiesValue(PropertyConstants.KEY_TERMINAL_CURSOR_STYLE, savedCursorStyle)
+        }
         
         Logger.logInfo(LOG_TAG, "Styling initialized: scheme=$schemeName, font=$fontName")
     }
@@ -249,9 +259,15 @@ class StylingManager @Inject constructor(
     
     /**
      * Set cursor style (block, underline, bar).
+     *
+     * The terminal reads the cursor style from termux.properties, so the value
+     * must be written there and the activity notified to reload the properties,
+     * otherwise the change would never reach the renderer.
      */
     suspend fun setCursorStyle(style: String) {
         dataStore.edit { it[KEY_CURSOR_STYLE] = style }
+        writeTerminalPropertiesValue(PropertyConstants.KEY_TERMINAL_CURSOR_STYLE, style)
+        notifyTermuxActivityStyleChanged()
         styleChangeListeners.forEach { it.onSettingsChanged() }
     }
     
@@ -300,6 +316,54 @@ class StylingManager @Inject constructor(
         }
     }
     
+    /**
+     * Write a single `key=value` entry into termux.properties, preserving all
+     * other lines. Existing keys are replaced in place.
+     */
+    private fun writeTerminalPropertiesValue(key: String, value: String) {
+        try {
+            val file = TermuxConstants.TERMUX_PROPERTIES_PRIMARY_FILE
+            file.parentFile?.mkdirs()
+
+            val lines = if (file.isFile) {
+                file.readLines().toMutableList()
+            } else {
+                mutableListOf("# Properties file for Termux Kotlin", "")
+            }
+
+            var replaced = false
+            for (i in lines.indices) {
+                val trimmed = lines[i].trim()
+                if (trimmed.startsWith("#")) continue
+                if (trimmed.substringBefore('=').trim() == key) {
+                    lines[i] = "$key=$value"
+                    replaced = true
+                    break
+                }
+            }
+            if (!replaced) lines.add("$key=$value")
+
+            file.writeText(lines.joinToString("\n") + "\n")
+            Logger.logDebug(LOG_TAG, "Wrote $key=$value to termux.properties")
+        } catch (e: Exception) {
+            Logger.logError(LOG_TAG, "Failed to write $key to termux.properties: ${e.message}")
+        }
+    }
+
+    /**
+     * Ask the running TermuxActivity to reload its style properties so that
+     * changes take effect immediately.
+     */
+    private fun notifyTermuxActivityStyleChanged() {
+        try {
+            val intent = Intent(TermuxConstants.TERMUX_APP.TERMUX_ACTIVITY.ACTION_RELOAD_STYLE)
+            intent.putExtra(TermuxConstants.TERMUX_APP.TERMUX_ACTIVITY.EXTRA_RECREATE_ACTIVITY, false)
+            context.sendBroadcast(intent)
+        } catch (e: Exception) {
+            Logger.logError(LOG_TAG, "Failed to broadcast style reload: ${e.message}")
+        }
+    }
+
     /**
      * Save a custom color scheme.
      */
