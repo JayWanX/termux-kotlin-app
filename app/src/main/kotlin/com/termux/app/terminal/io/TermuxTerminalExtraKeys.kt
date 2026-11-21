@@ -1,7 +1,6 @@
 package com.termux.app.terminal.io
 
 import android.annotation.SuppressLint
-import android.view.Gravity
 import android.view.View
 import com.termux.app.TermuxActivity
 import com.termux.app.terminal.TermuxTerminalSessionActivityClient
@@ -89,14 +88,8 @@ class TermuxTerminalExtraKeys(
                 mTermuxTerminalViewClient?.onToggleSoftKeyboardRequest()
             }
             "DRAWER" -> {
-                val drawerLayout = mTermuxTerminalViewClient?.activity?.drawer
-                if (drawerLayout != null) {
-                    if (drawerLayout.isDrawerOpen(Gravity.LEFT)) {
-                        drawerLayout.closeDrawer(Gravity.LEFT)
-                    } else {
-                        drawerLayout.openDrawer(Gravity.LEFT)
-                    }
-                }
+                // The left drawer has been removed; open the session list dialog instead.
+                mTermuxTerminalSessionActivityClient?.showSessionListDialog()
             }
             "PASTE" -> {
                 mTermuxTerminalSessionActivityClient?.onPasteTextFromClipboard(null)

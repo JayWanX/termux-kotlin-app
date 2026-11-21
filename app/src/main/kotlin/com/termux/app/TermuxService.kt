@@ -595,7 +595,7 @@ class TermuxService : Service(), AppShell.AppShellClient, TermuxSession.TermuxSe
             mShellManager.mPendingPluginExecutionCommands.remove(executionCommand)
         }
 
-        // Notify TermuxSessionsListViewController that sessions list has been updated
+        // Notify the activity that the sessions list has been updated
         mTermuxTerminalSessionActivityClient?.termuxSessionListNotifyUpdated()
 
         updateNotification()

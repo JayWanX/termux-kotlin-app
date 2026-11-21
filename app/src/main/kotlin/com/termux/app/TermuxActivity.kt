@@ -20,19 +20,15 @@ import android.view.MenuItem
 import android.view.View
 import android.view.WindowManager
 import android.widget.EditText
-import android.widget.ImageButton
-import android.widget.ListView
 import android.widget.RelativeLayout
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
-import androidx.drawerlayout.widget.DrawerLayout
 import androidx.viewpager.widget.ViewPager
 import com.termux.R
 import com.termux.app.activities.HelpActivity
 import com.termux.app.activities.SettingsActivity
 import com.termux.app.api.file.FileReceiverActivity
 import com.termux.app.terminal.TermuxActivityRootView
-import com.termux.app.terminal.TermuxSessionsListViewController
 import com.termux.app.terminal.TermuxTerminalSessionActivityClient
 import com.termux.app.terminal.TermuxTerminalViewClient
 import com.termux.app.terminal.io.TerminalToolbarViewPager
@@ -49,7 +45,6 @@ import com.termux.shared.termux.TermuxConstants.TERMUX_APP.TERMUX_ACTIVITY
 import com.termux.shared.termux.TermuxUtils
 import com.termux.shared.termux.crash.TermuxCrashUtils
 import com.termux.shared.termux.extrakeys.ExtraKeysView
-import com.termux.shared.termux.interact.TextInputDialogUtils
 import com.termux.shared.termux.settings.preferences.TermuxAppSharedPreferences
 import com.termux.shared.termux.settings.properties.TermuxAppSharedProperties
 import com.termux.shared.termux.theme.TermuxThemeUtils
@@ -92,9 +87,6 @@ class TermuxActivity : AppCompatActivity(), ServiceConnection {
 
     /** The client for the [mExtraKeysView]. */
     var mTermuxTerminalExtraKeys: TermuxTerminalExtraKeys? = null
-
-    /** The termux sessions list controller. */
-    private var mTermuxSessionListViewController: TermuxSessionsListViewController? = null
 
     /** The [TermuxActivity] broadcast receiver for various things like terminal style configuration changes. */
     private val mTermuxActivityBroadcastReceiver: BroadcastReceiver = TermuxActivityBroadcastReceiver()
@@ -165,9 +157,6 @@ class TermuxActivity : AppCompatActivity(), ServiceConnection {
 
         setTermuxTerminalViewAndClients()
         setTerminalToolbarView(savedInstanceState)
-        setSettingsButtonView()
-        setNewSessionButtonView()
-        setToggleKeyboardView()
 
         registerForContextMenu(mTerminalView)
 
@@ -248,7 +237,6 @@ class TermuxActivity : AppCompatActivity(), ServiceConnection {
 
         removeTermuxActivityRootViewGlobalLayoutListener()
         unregisterTermuxActivityBroadcastReceiver()
-        drawer.closeDrawers()
     }
 
     override fun onDestroy() {
@@ -291,8 +279,6 @@ class TermuxActivity : AppCompatActivity(), ServiceConnection {
             Logger.logError(LOG_TAG, "onServiceConnected: mTermuxService is null after assignment")
             return
         }
-
-        setTermuxSessionsListView()
 
         val intent = intent
         setIntent(null)
@@ -375,19 +361,6 @@ class TermuxActivity : AppCompatActivity(), ServiceConnection {
         termuxTerminalSessionActivityClient.onCreate()
     }
 
-    private fun setTermuxSessionsListView() {
-        val termuxService = mTermuxService
-        if (termuxService == null) {
-            Logger.logError(LOG_TAG, "setTermuxSessionsListView: mTermuxService is null")
-            return
-        }
-        val termuxSessionsListView = findViewById<ListView>(R.id.terminal_sessions_list)
-        mTermuxSessionListViewController = TermuxSessionsListViewController(this, termuxService.termuxSessions)
-        termuxSessionsListView.adapter = mTermuxSessionListViewController
-        termuxSessionsListView.onItemClickListener = mTermuxSessionListViewController
-        termuxSessionsListView.onItemLongClickListener = mTermuxSessionListViewController
-    }
-
     private fun setTerminalToolbarView(savedInstanceState: Bundle?) {
         mTermuxTerminalExtraKeys = TermuxTerminalExtraKeys(
             this, mTerminalView,
@@ -457,54 +430,11 @@ class TermuxActivity : AppCompatActivity(), ServiceConnection {
         }
     }
 
-    private fun setSettingsButtonView() {
-        val settingsButton = findViewById<ImageButton>(R.id.settings_button)
-        settingsButton.setOnClickListener {
-            ActivityUtils.startActivity(this, Intent(this, SettingsActivity::class.java))
-        }
-    }
-
-    private fun setNewSessionButtonView() {
-        val newSessionButton = findViewById<View>(R.id.new_session_button)
-        newSessionButton.setOnClickListener {
-            mTermuxTerminalSessionActivityClient?.addNewSession(false, null)
-        }
-        newSessionButton.setOnLongClickListener {
-            TextInputDialogUtils.textInput(
-                this@TermuxActivity, R.string.title_create_named_session, null,
-                R.string.action_create_named_session_confirm, { text ->
-                    mTermuxTerminalSessionActivityClient?.addNewSession(false, text)
-                },
-                R.string.action_new_session_failsafe, { text ->
-                    mTermuxTerminalSessionActivityClient?.addNewSession(true, text)
-                },
-                -1, null, null
-            )
-            true
-        }
-    }
-
-    private fun setToggleKeyboardView() {
-        findViewById<View>(R.id.toggle_keyboard_button).setOnClickListener {
-            mTermuxTerminalViewClient?.onToggleSoftKeyboardRequest()
-            drawer.closeDrawers()
-        }
-
-        findViewById<View>(R.id.toggle_keyboard_button).setOnLongClickListener {
-            toggleTerminalToolbar()
-            true
-        }
-    }
-
     @Suppress("MissingSuperCall")
     @SuppressLint("RtlHardcoded")
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
-        if (drawer.isDrawerOpen(Gravity.LEFT)) {
-            drawer.closeDrawers()
-        } else {
-            finishActivityIfNotFinishing()
-        }
+        finishActivityIfNotFinishing()
     }
 
     fun finishActivityIfNotFinishing() {
@@ -731,9 +661,6 @@ class TermuxActivity : AppCompatActivity(), ServiceConnection {
         mExtraKeysView = extraKeysView
     }
 
-    val drawer: DrawerLayout
-        get() = findViewById(R.id.drawer_layout)
-
     val terminalToolbarViewPager: ViewPager?
         get() = findViewById(R.id.terminal_toolbar_view_pager)
 
@@ -747,7 +674,8 @@ class TermuxActivity : AppCompatActivity(), ServiceConnection {
         get() = terminalToolbarViewPager?.currentItem == 1
 
     fun termuxSessionListNotifyUpdated() {
-        mTermuxSessionListViewController?.notifyDataSetChanged()
+        // The left session drawer has been removed; the session list dialog
+        // rebuilds its entries every time it is shown, so no refresh is needed.
     }
 
     val isVisible: Boolean

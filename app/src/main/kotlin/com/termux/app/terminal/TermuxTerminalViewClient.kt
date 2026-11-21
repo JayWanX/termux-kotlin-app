@@ -5,14 +5,12 @@ import android.app.AlertDialog
 import android.content.Context
 import android.media.AudioManager
 import android.os.Environment
-import android.view.Gravity
 import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
 import android.widget.EditText
 import android.widget.ListView
-import androidx.drawerlayout.widget.DrawerLayout
 import com.termux.R
 import com.termux.app.TermuxActivity
 import com.termux.app.models.UserAction
@@ -171,9 +169,8 @@ class TermuxTerminalViewClient(
     }
 
     override fun copyModeChanged(copyMode: Boolean) {
-        mActivity.drawer.setDrawerLockMode(
-            if (copyMode) DrawerLayout.LOCK_MODE_LOCKED_CLOSED else DrawerLayout.LOCK_MODE_UNLOCKED
-        )
+        // The left drawer has been removed, so there is nothing to lock while
+        // text selection (copy mode) is active.
     }
 
     @SuppressLint("RtlHardcoded")
@@ -193,9 +190,9 @@ class TermuxTerminalViewClient(
                 keyCode == KeyEvent.KEYCODE_DPAD_UP || unicodeChar == 'p'.code ->
                     mTermuxTerminalSessionActivityClient.switchToSession(false)
                 keyCode == KeyEvent.KEYCODE_DPAD_RIGHT ->
-                    mActivity.drawer.openDrawer(Gravity.LEFT)
+                    mTermuxTerminalSessionActivityClient.switchToSession(true)
                 keyCode == KeyEvent.KEYCODE_DPAD_LEFT ->
-                    mActivity.drawer.closeDrawers()
+                    mTermuxTerminalSessionActivityClient.switchToSession(false)
                 unicodeChar == 'k'.code ->
                     onToggleSoftKeyboardRequest()
                 unicodeChar == 'm'.code ->

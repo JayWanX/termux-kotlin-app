@@ -6,8 +6,8 @@ import android.graphics.Typeface
 import android.media.AudioAttributes
 import android.media.SoundPool
 import android.text.TextUtils
-import android.view.Gravity
-import android.widget.ListView
+import android.view.Menu
+import android.widget.PopupMenu
 import com.termux.R
 import com.termux.app.TermuxActivity
 import com.termux.app.TermuxService
@@ -222,7 +222,6 @@ class TermuxTerminalSessionActivityClient(private val mActivity: TermuxActivity)
             notifyOfSessionChange()
         }
 
-        checkAndScrollToSession(session)
         updateBackgroundColor()
     }
 
@@ -303,8 +302,6 @@ class TermuxTerminalSessionActivityClient(private val mActivity: TermuxActivity)
 
             val newTerminalSession = newTermuxSession.terminalSession
             setCurrentSession(newTerminalSession)
-
-            mActivity.drawer.closeDrawers()
         }
     }
 
@@ -356,19 +353,6 @@ class TermuxTerminalSessionActivityClient(private val mActivity: TermuxActivity)
 
     fun termuxSessionListNotifyUpdated() {
         mActivity.termuxSessionListNotifyUpdated()
-    }
-
-    fun checkAndScrollToSession(session: TerminalSession) {
-        if (!mActivity.isVisible) return
-        val service = mActivity.termuxService ?: return
-
-        val indexOfSession = service.getIndexOfSession(session)
-        if (indexOfSession < 0) return
-        val termuxSessionsListView = mActivity.findViewById<ListView>(R.id.terminal_sessions_list)
-            ?: return
-
-        termuxSessionsListView.setItemChecked(indexOfSession, true)
-        termuxSessionsListView.postDelayed({ termuxSessionsListView.smoothScrollToPosition(indexOfSession) }, 1000)
     }
 
     fun toToastTitle(session: TerminalSession?): String? {
@@ -427,7 +411,6 @@ class TermuxTerminalSessionActivityClient(private val mActivity: TermuxActivity)
 
     /**
      * Show a dialog listing all running sessions so the user can switch between them
-     * without opening the drawer.
      */
     fun showSessionListDialog() {
         val service = mActivity.termuxService ?: return
@@ -457,11 +440,9 @@ class TermuxTerminalSessionActivityClient(private val mActivity: TermuxActivity)
             ) { dialog, which ->
                 switchToSession(which)
                 dialog.dismiss()
-                mActivity.drawer.closeDrawers()
             }
             .setNeutralButton(R.string.action_session_list_more) { _, _ ->
-                // Open the drawer for full session management (rename/kill via long press)
-                mActivity.drawer.openDrawer(Gravity.LEFT)
+                showSessionMoreMenu()
             }
             .setNegativeButton(R.string.action_new_session) { _, _ ->
                 addNewSession(false, null)
@@ -470,8 +451,57 @@ class TermuxTerminalSessionActivityClient(private val mActivity: TermuxActivity)
             .show()
     }
 
+    /**
+     * Show the "More" popup menu for the session list dialog.
+     *
+     * Provides three actions:
+     * - Create a new system session
+     * - Finish all other sessions, keeping the current one
+     * - Finish all sessions
+     */
+    private fun showSessionMoreMenu() {
+        val service = mActivity.termuxService ?: return
+        val currentSession = mActivity.currentSession
+
+        PopupMenu(mActivity, mActivity.terminalView).apply {
+            menu.add(Menu.NONE, MENU_NEW_SYSTEM_SESSION, Menu.NONE, R.string.action_new_system_session)
+            menu.add(Menu.NONE, MENU_FINISH_OTHER_SESSIONS, Menu.NONE, R.string.action_finish_other_sessions)
+            menu.add(Menu.NONE, MENU_FINISH_ALL_SESSIONS, Menu.NONE, R.string.action_finish_all_sessions)
+
+            setOnMenuItemClickListener { item ->
+                when (item.itemId) {
+                    MENU_NEW_SYSTEM_SESSION -> {
+                        addNewSession(false, null)
+                        true
+                    }
+                    MENU_FINISH_OTHER_SESSIONS -> {
+                        if (service.termuxSessionsSize > 1) {
+                            val toFinish = service.termuxSessions
+                                .filter { it.terminalSession != currentSession }
+                                .map { it.terminalSession }
+                            toFinish.forEach { it.finishIfRunning() }
+                        }
+                        true
+                    }
+                    MENU_FINISH_ALL_SESSIONS -> {
+                        val toFinish = service.termuxSessions.map { it.terminalSession }
+                        toFinish.forEach { it.finishIfRunning() }
+                        true
+                    }
+                    else -> false
+                }
+            }
+            show()
+        }
+    }
+
     companion object {
         private const val MAX_SESSIONS = 8
         private const val LOG_TAG = "TermuxTerminalSessionActivityClient"
+
+        /** Menu item ids for the session list "More" popup menu. */
+        private const val MENU_NEW_SYSTEM_SESSION = 1
+        private const val MENU_FINISH_OTHER_SESSIONS = 2
+        private const val MENU_FINISH_ALL_SESSIONS = 3
     }
 }
