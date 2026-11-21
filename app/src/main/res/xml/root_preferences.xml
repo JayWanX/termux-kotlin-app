@@ -35,6 +35,12 @@
         app:fragment="com.termux.app.fragments.settings.TermuxWidgetPreferencesFragment"/>
 
     <Preference
+        app:key="assistant"
+        app:title="@string/assistant_preferences_title"
+        app:summary="@string/assistant_preferences_summary"
+        app:fragment="com.termux.app.ai.AssistantPreferencesFragment"/>
+
+    <Preference
         app:key="about"
         app:title="@string/about_preference_title"
         app:persistent="false"/>

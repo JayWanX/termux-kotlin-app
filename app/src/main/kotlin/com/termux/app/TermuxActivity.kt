@@ -20,8 +20,10 @@ import android.view.MenuItem
 import android.view.View
 import android.view.WindowManager
 import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.RelativeLayout
 import android.widget.Toast
+import android.view.ViewGroup
 import androidx.appcompat.app.AppCompatActivity
 import androidx.viewpager.widget.ViewPager
 import com.termux.R
@@ -52,6 +54,13 @@ import com.termux.shared.theme.NightMode
 import com.termux.shared.view.ViewUtils
 import com.termux.terminal.TerminalSession
 import com.termux.view.TerminalView
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
+import com.termux.app.terminal.TerminalControlImpl
+import com.termux.app.terminal.CommandCompletionNotifier
+import com.termux.app.ai.AiPanelController
+import com.termux.shared.terminal.TerminalControl
+import com.termux.shared.termux.shell.TermuxShellManager
 
 /**
  * A terminal emulator activity.
@@ -63,6 +72,41 @@ class TermuxActivity : AppCompatActivity(), ServiceConnection {
 
     /** The [TerminalView] shown in [TermuxActivity] that displays the terminal. */
     lateinit var mTerminalView: TerminalView
+
+    /**
+     * The shared entry point for observing and driving the terminal.
+     *
+     * Optional features (notifications, the assistant panel, accessibility helpers) must go through
+     * this instead of touching [TerminalSession] directly.
+     *
+     * This is a read-only accessor over a private backing field so other classes can check
+     * [hasTerminalControl] without reaching into `lateinit` state and risking an exception.
+     */
+    val terminalControl: TerminalControl
+        get() = terminalControlBacking
+            ?: error("terminalControl accessed before it was created")
+
+    private var terminalControlBacking: TerminalControl? = null
+
+    /** True once [terminalControl] is safe to read. */
+    val hasTerminalControl: Boolean
+        get() = terminalControlBacking != null
+
+    private var terminalControlImpl: TerminalControlImpl? = null
+
+    /** Raises a notification when a long-running command finishes while the app is in the background. */
+    private var commandCompletionNotifier: CommandCompletionNotifier? = null
+
+    /**
+     * The optional assistant panel.
+     *
+     * Null until the user first opens it, and only created when the assistant is enabled, so that a
+     * user who never turns the feature on pays nothing for it.
+     */
+    private var aiPanelController: AiPanelController? = null
+
+    /** Container the assistant panel is mounted into, created lazily. */
+    private var aiPanelContainer: FrameLayout? = null
 
     /** The [com.termux.view.TerminalViewClient] interface implementation. */
     var mTermuxTerminalViewClient: TermuxTerminalViewClient? = null
@@ -225,6 +269,8 @@ class TermuxActivity : AppCompatActivity(), ServiceConnection {
         mTermuxTerminalSessionActivityClient?.onResume()
         mTermuxTerminalViewClient?.onResume()
 
+        startTerminalControl()
+
         // Check if a crash happened on last run
         TermuxCrashUtils.notifyAppCrashFromCrashLogFile(this, LOG_TAG)
 
@@ -238,6 +284,8 @@ class TermuxActivity : AppCompatActivity(), ServiceConnection {
         if (mIsInvalidState) return
 
         mIsVisible = false
+
+        stopTerminalControl()
 
         mTermuxTerminalSessionActivityClient?.onStop()
         mTermuxTerminalViewClient?.onStop()
@@ -496,6 +544,13 @@ class TermuxActivity : AppCompatActivity(), ServiceConnection {
     @SuppressLint("RtlHardcoded")
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
+        // Back closes the assistant panel first, so reaching for the panel does not trap the user in
+        // it (or exit the app by muscle memory).
+        val controller = aiPanelController
+        if (controller != null && controller.isVisible()) {
+            controller.hide()
+            return
+        }
         finishActivityIfNotFinishing()
     }
 
@@ -541,6 +596,12 @@ class TermuxActivity : AppCompatActivity(), ServiceConnection {
         menu.findItem(CONTEXT_MENU_TOGGLE_KEEP_SCREEN_ON)?.isChecked = mPreferences?.shouldKeepScreenOn() == true
         menu.add(Menu.NONE, CONTEXT_MENU_HELP_ID, Menu.NONE, R.string.action_open_help)
         menu.add(Menu.NONE, CONTEXT_MENU_SETTINGS_ID, Menu.NONE, R.string.action_open_settings)
+        // The assistant entry only exists when the user has enabled and configured it. This must not
+        // consult aiPanelController: that is null until the panel is first opened, so gating on it
+        // would leave the entry permanently unreachable.
+        if (com.termux.app.ai.AiConfig.get(this).isUsable()) {
+            menu.add(Menu.NONE, CONTEXT_MENU_ASSISTANT_ID, Menu.NONE, R.string.assistant_menu_entry)
+        }
     }
 
     /** Hook system menu to show context menu instead. */
@@ -583,6 +644,10 @@ class TermuxActivity : AppCompatActivity(), ServiceConnection {
             }
             CONTEXT_MENU_SETTINGS_ID -> {
                 ActivityUtils.startActivity(this, Intent(this, SettingsActivity::class.java))
+                true
+            }
+            CONTEXT_MENU_ASSISTANT_ID -> {
+                toggleAssistantPanel()
                 true
             }
             else -> super.onContextItemSelected(item)
@@ -746,6 +811,240 @@ class TermuxActivity : AppCompatActivity(), ServiceConnection {
     val currentSession: TerminalSession?
         get() = mTerminalView.currentSession
 
+    /**
+     * Creates the [TerminalControl] instance bound to this activity's lifetime.
+     *
+     * The provider lambdas keep this class from holding an activity reference, so the control object
+     * cannot outlive the activity and leak it.
+     */
+    private fun createTerminalControl() {
+        terminalControlImpl = TerminalControlImpl(
+            scope = lifecycleScope,
+            sessionProvider = { mTerminalView.currentSession },
+            sessionsProvider = {
+                runCatching {
+                    TermuxShellManager.getShellManager()
+                        ?.mTermuxSessions
+                        ?.map { it.terminalSession }
+                        ?: emptyList()
+                }.getOrDefault(emptyList())
+            },
+            selectSessionAction = { session ->
+                mTermuxTerminalSessionActivityClient?.setCurrentSession(session)
+            },
+        )
+        terminalControlBacking = terminalControlImpl
+
+        // Start recording command history once the terminal exists. Idempotent on repeated resumes.
+        if (commandHistoryRecorder == null) {
+            commandHistoryRecorder = com.termux.app.terminal.CommandHistoryRecorder(
+                historyFile = com.termux.app.terminal.CommandHistoryRecorder.defaultFile(
+                    com.termux.shared.termux.TermuxConstants.TERMUX_HOME_DIR_PATH,
+                ),
+                scope = lifecycleScope,
+            ).also { it.start(terminalControl) }
+        }
+
+        val notifier = commandCompletionNotifier ?: CommandCompletionNotifier(this).also {
+            commandCompletionNotifier = it
+        }
+        terminalControlImpl?.stateListener = { sessionId, state, snapshot ->
+            notifier.onStateChanged(
+                sessionId = sessionId,
+                sessionTitle = snapshot?.title.orEmpty(),
+                state = state,
+                snapshot = snapshot,
+                nowMs = android.os.SystemClock.elapsedRealtime(),
+                appVisible = mIsVisible,
+            )
+        }
+    }
+
+    /** Thin strip above the terminal showing busy/exited state; hidden while idle. */
+    private var terminalStatusView: com.termux.app.terminal.TerminalStatusView? = null
+
+    /**
+     * Records the commands the user runs, with exit status and duration.
+     *
+     * Exposed so the session menu can read it back; null until the terminal exists.
+     */
+    var commandHistoryRecorder: com.termux.app.terminal.CommandHistoryRecorder? = null
+        private set
+
+    private var statusJob: kotlinx.coroutines.Job? = null
+
+    private fun startTerminalControl() {
+        if (terminalControlImpl == null) createTerminalControl()
+        terminalControlImpl?.start()
+        startStatusStrip()
+
+        // Bind the optional assistant to the same terminal. This is the only coupling between the
+        // terminal and the assistant; deleting the ai package turns it into a no-op.
+        //
+        // Bind whenever the assistant is enabled, not only when it is already fully configured, so
+        // that turning it on in Settings while the activity is alive takes effect on the next resume.
+        // Attachment is cheap and [AiAssistant.isAvailable] still gates whether it can be used.
+        val aiConfig = com.termux.app.ai.AiConfig.get(this)
+        if (aiConfig.enabled) {
+            com.termux.app.ai.AiAssistant.attach(terminalControl, aiConfig)
+        } else {
+            com.termux.app.ai.AiAssistant.detach()
+        }
+    }
+
+    private fun stopTerminalControl() {
+        statusJob?.cancel()
+        statusJob = null
+        terminalStatusView?.hideStrip()
+        terminalControlImpl?.stop()
+    }
+
+    /**
+     * Keeps the status strip in sync with the live session state.
+     *
+     * Collected on the lifecycle scope so the subscription dies with the activity; without that, a
+     * rotating device would leave several collectors writing to a stale view.
+     */
+    private fun startStatusStrip() {
+        val view = findViewById<com.termux.app.terminal.TerminalStatusView>(
+            R.id.terminal_status_view,
+        ) ?: return
+        terminalStatusView = view
+
+        statusJob?.cancel()
+        statusJob = lifecycleScope.launch {
+            terminalControl.state.collect { state ->
+                val title = currentSession?.let { it.mSessionName ?: it.title }
+                val busyFor = (state as? com.termux.shared.terminal.TerminalState.Busy)?.let {
+                    android.os.SystemClock.elapsedRealtime() - it.sinceMs
+                }
+                view.render(state, title, busyFor)
+            }
+        }
+    }
+
+    /**
+     * Shows or hides the assistant panel.
+     *
+     * The panel is mounted as an overlay on top of the terminal rather than being part of the terminal
+     * layout, so that enabling or deleting the assistant never affects terminal behaviour.
+     */
+    private fun toggleAssistantPanel() {
+        try {
+            openAssistantPanel()
+        } catch (e: Throwable) {
+            // An optional feature must never take the terminal down with it. The failure is reported on
+            // screen as well as to logcat, because diagnosing it otherwise requires adb access.
+            Logger.logError(LOG_TAG, "Failed to open assistant panel: ${e.message}")
+            Logger.logStackTraceWithMessage(LOG_TAG, "assistant panel failure", e)
+
+            val detail = buildString {
+                append(e::class.java.simpleName)
+                e.message?.take(160)?.let { append(": ").append(it) }
+            }
+            Toast.makeText(this, detail, Toast.LENGTH_LONG).show()
+
+            // Also keep a copy on disk so the full stack survives even if logcat is unavailable.
+            runCatching {
+                val report = java.io.File(filesDir, "assistant-panel-error.txt")
+                report.writeText(
+                    buildString {
+                        appendLine("time: ${java.util.Date()}")
+                        appendLine(e.toString())
+                        e.stackTrace.forEach { appendLine("  at $it") }
+                        var cause = e.cause
+                        while (cause != null) {
+                            appendLine("caused by: $cause")
+                            cause.stackTrace.take(20).forEach { appendLine("  at $it") }
+                            cause = cause.cause
+                        }
+                    },
+                )
+            }
+        }
+    }
+
+    private fun openAssistantPanel() {
+        val config = com.termux.app.ai.AiConfig.get(this)
+        if (!config.isUsable()) {
+            Toast.makeText(this, R.string.assistant_not_configured, Toast.LENGTH_LONG).show()
+            return
+        }
+
+        // The panel can only open when the assistant is bound to a live TerminalControl. Re-attach
+        // here so that enabling the assistant from Settings while this activity is kept alive works
+        // without requiring a restart.
+        com.termux.app.ai.AiAssistant.attach(terminalControl, config)
+        if (!com.termux.app.ai.AiAssistant.isAvailable()) {
+            Toast.makeText(this, R.string.assistant_not_configured, Toast.LENGTH_LONG).show()
+            return
+        }
+
+        val controller = aiPanelController ?: run {
+            val container = ensureAiPanelContainer()
+            val created = AiPanelController(
+                lifecycleOwner = this,
+                container = container,
+                terminal = terminalControl,
+            )
+            aiPanelController = created
+            created
+        }
+
+        if (controller.session() == null) {
+            Toast.makeText(this, R.string.assistant_not_configured, Toast.LENGTH_LONG).show()
+            return
+        }
+        controller.toggle()
+    }
+
+    /** Creates the overlay container on first use. */
+    private fun ensureAiPanelContainer(): FrameLayout {
+        aiPanelContainer?.let { return it }
+
+        // The overlay must live in the relative layout so it covers the terminal.
+        //
+        // `generateLayoutParams(null)` is not usable here: RelativeLayout throws
+        // "You must supply a layout_width attribute" when handed an empty attribute set. Constructing
+        // the parent's own LayoutParams type directly is the safe way to get both a matching type and
+        // the required width/height.
+        val parent = findViewById<ViewGroup>(R.id.activity_termux_root_relative_layout)
+            ?: findViewById<ViewGroup>(android.R.id.content)
+            ?: error("no view group to host the assistant panel")
+
+        val container = FrameLayout(this)
+        val params: ViewGroup.LayoutParams = when (parent) {
+            is android.widget.RelativeLayout ->
+                android.widget.RelativeLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                )
+            is android.widget.LinearLayout ->
+                android.widget.LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                )
+            is FrameLayout ->
+                FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                )
+            else -> ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT,
+            )
+        }
+        container.layoutParams = params
+        container.visibility = View.GONE
+        container.setBackgroundColor(0xEE000000.toInt())
+        container.isClickable = true
+        container.isFocusable = true
+
+        parent.addView(container)
+        aiPanelContainer = container
+        return container
+    }
+
     val preferences: TermuxAppSharedPreferences?
         get() = mPreferences
 
@@ -841,6 +1140,7 @@ class TermuxActivity : AppCompatActivity(), ServiceConnection {
         private const val CONTEXT_MENU_TOGGLE_KEEP_SCREEN_ON = 6
         private const val CONTEXT_MENU_HELP_ID = 7
         private const val CONTEXT_MENU_SETTINGS_ID = 8
+        private const val CONTEXT_MENU_ASSISTANT_ID = 9
 
         private const val ARG_TERMINAL_TOOLBAR_TEXT_INPUT = "terminal_toolbar_text_input"
         private const val ARG_ACTIVITY_RECREATED = "activity_recreated"

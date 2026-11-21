@@ -2,6 +2,8 @@ package com.termux.app.terminal
 
 import android.annotation.SuppressLint
 import android.app.AlertDialog
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 import android.graphics.Typeface
 import android.media.AudioAttributes
 import android.media.SoundPool
@@ -442,22 +444,48 @@ class TermuxTerminalSessionActivityClient(private val mActivity: TermuxActivity)
 
     /**
      * Build the display labels for all running sessions.
+     *
+     * Each row carries the session's live state and working directory, so the list doubles as a health
+     * view: a dead session or one stuck in a directory is visible without switching to it.
      */
     private fun buildSessionLabels(service: TermuxService): ArrayList<String> {
         val sessions = ArrayList<String>()
         val sessionCount = service.termuxSessionsSize
+
+        // terminalControl is created during onResume; the session dialog can be opened before that on a
+        // cold start, so the lookup degrades rather than throwing.
+        val infos = if (mActivity.hasTerminalControl) {
+            runCatching { mActivity.terminalControl.sessions().associateBy { it.id } }
+                .getOrDefault(emptyMap())
+        } else {
+            emptyMap()
+        }
+
         for (i in 0 until sessionCount) {
             val termuxSession = service.getTermuxSession(i) ?: continue
             val terminalSession = termuxSession.terminalSession
-            // Label format matches "[1] <name>" style used by the session toasts
-            val label = mutableListOf<String>()
-            val name = terminalSession.mSessionName
-            label.add(if (TextUtils.isEmpty(name)) "Session [${i + 1}]" else "$name [${i + 1}]")
-            val processTitle = terminalSession.title
-            if (!processTitle.isNullOrEmpty() && processTitle != name) {
-                label.add(processTitle)
+            val sessionId = terminalSession.mSessionName ?: terminalSession.getPid().toString()
+            val info = infos[sessionId]
+
+            val label = if (info != null) {
+                SessionLabelFormatter.format(
+                    index = i + 1,
+                    info = info,
+                    name = terminalSession.mSessionName,
+                    title = terminalSession.title,
+                )
+            } else {
+                // Fall back to the previous plain label if the state snapshot is unavailable.
+                val name = terminalSession.mSessionName
+                val head = if (TextUtils.isEmpty(name)) "Session [${i + 1}]" else "$name [${i + 1}]"
+                val processTitle = terminalSession.title
+                if (!processTitle.isNullOrEmpty() && processTitle != name) {
+                    "$head $processTitle"
+                } else {
+                    head
+                }
             }
-            sessions.add(label.joinToString(" "))
+            sessions.add(label)
         }
         return sessions
     }
@@ -551,6 +579,262 @@ class TermuxTerminalSessionActivityClient(private val mActivity: TermuxActivity)
     }
 
     /**
+     * Opens the scrollback search dialog.
+     *
+     * The dialog is intentionally simple: a query field, a match count and previous/next buttons. It
+     * does not highlight inside the terminal view (that would require touching the renderer), it reports
+     * where the matches are and scrolls the terminal to them, which covers the actual need of finding
+     * something in a long log.
+     */
+    private fun showScrollbackSearchDialog() {
+        if (!mActivity.hasTerminalControl) {
+            mActivity.showToast(mActivity.getString(R.string.search_no_session), true)
+            return
+        }
+
+        val container = android.widget.LinearLayout(mActivity).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            val pad = (mActivity.resources.displayMetrics.density * 16).toInt()
+            setPadding(pad, pad / 2, pad, 0)
+        }
+        val input = android.widget.EditText(mActivity).apply {
+            hint = mActivity.getString(R.string.search_hint)
+            setSingleLine(true)
+        }
+        val resultLabel = android.widget.TextView(mActivity).apply {
+            val pad = (mActivity.resources.displayMetrics.density * 4).toInt()
+            setPadding(0, pad, 0, pad)
+            text = ""
+        }
+        container.addView(input)
+        container.addView(resultLabel)
+
+        var matches: List<com.termux.shared.terminal.TranscriptSearch.Match> = emptyList()
+        var index = -1
+        var searchJob: kotlinx.coroutines.Job? = null
+
+        fun showCurrent() {
+            val match = matches.getOrNull(index) ?: return
+            resultLabel.text = buildString {
+                append(index + 1).append('/').append(matches.size).append("  ")
+                append(match.line.trim().take(120))
+            }
+        }
+
+        fun jump(direction: Int) {
+            if (matches.isEmpty()) return
+            index = if (direction > 0) {
+                if (index + 1 >= matches.size) 0 else index + 1
+            } else {
+                if (index <= 0) matches.size - 1 else index - 1
+            }
+            val match = matches[index]
+            // Scroll the terminal so the matching row is visible.
+            mActivity.terminalView?.let { view ->
+                val emulator = mActivity.currentSession?.emulator ?: return@let
+                val screen = emulator.getScreen()
+                val target = match.lineIndex - screen.activeTranscriptRows
+                view.setTopRow(target.coerceAtMost(0))
+            }
+            showCurrent()
+        }
+
+        val dialog = AlertDialog.Builder(mActivity)
+            .setTitle(R.string.action_search)
+            .setView(container)
+            .setPositiveButton(R.string.search_next) { _, _ -> jump(+1) }
+            .setNegativeButton(R.string.search_prev) { _, _ -> jump(-1) }
+            .setNeutralButton(R.string.search_close, null)
+            .create()
+
+        // Re-run the search as the user types, debounced by cancelling the previous job.
+        input.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) = Unit
+            override fun afterTextChanged(s: android.text.Editable?) {
+                val query = s?.toString().orEmpty()
+                searchJob?.cancel()
+                if (query.isBlank()) {
+                    matches = emptyList()
+                    index = -1
+                    resultLabel.text = ""
+                    return
+                }
+                searchJob = mActivity.lifecycleScope.launch {
+                    val found = runCatching {
+                        mActivity.terminalControl.searchScrollback(query)
+                    }.getOrDefault(emptyList())
+                    matches = found
+                    index = if (found.isEmpty()) -1 else 0
+                    resultLabel.text = com.termux.shared.terminal.TranscriptSearch
+                        .summarize(found, query)
+                    showCurrent()
+                }
+            }
+        })
+
+        dialog.setOnDismissListener { searchJob?.cancel() }
+        dialog.show()
+    }
+
+    /**
+     * Opens the session template picker.
+     *
+     * Selecting a template creates a session in the template's directory and, if it defines one, types
+     * its first command. Long-pressing a user template offers deletion.
+     */
+    private fun showSessionTemplateDialog() {
+        val service = mActivity.termuxService ?: return
+        val store = SessionTemplateStore(mActivityTemplateFile())
+        val templates = store.load()
+        if (templates.isEmpty()) {
+            mActivity.showToast(mActivity.getString(R.string.template_none), true)
+            return
+        }
+
+        val labels = templates.map { template ->
+            buildString {
+                append(template.name)
+                template.workingDirectory?.let { append("  ·  ").append(it) }
+                template.initialCommand?.let { append("  ›  ").append(it.take(40)) }
+            }
+        }.toTypedArray()
+
+        AlertDialog.Builder(mActivity)
+            .setTitle(R.string.action_new_from_template)
+            .setItems(labels) { _, which ->
+                launchFromTemplate(service, templates[which])
+            }
+            .setNeutralButton(R.string.action_manage_templates, null)
+            .setNegativeButton(android.R.string.cancel, null)
+            .create()
+            .apply {
+                setOnShowListener {
+                    getButton(AlertDialog.BUTTON_NEUTRAL)?.setOnClickListener {
+                        dismiss()
+                        showManageTemplatesDialog(store)
+                    }
+                }
+            }
+            .show()
+    }
+
+    /** Creates a session from [template] and runs its initial command once the shell is ready. */
+    private fun launchFromTemplate(service: TermuxService, template: SessionTemplates.Template) {
+        if (service.termuxSessionsSize >= MAX_SESSIONS) {
+            mActivity.showToast(mActivity.getString(R.string.msg_max_terminals_reached), true)
+            return
+        }
+
+        val workingDirectory = template.workingDirectory?.let {
+            if (it.startsWith("~")) mActivity.properties?.getDefaultWorkingDirectory() ?: it else it
+        } ?: mActivity.currentSession?.getCwd()
+
+        val newTermuxSession = service.createTermuxSession(
+            null,
+            null,
+            null,
+            workingDirectory,
+            false,
+            template.name,
+        ) ?: return
+        val terminalSession = newTermuxSession.terminalSession
+        setCurrentSession(terminalSession)
+
+        val command = SessionTemplates.launchCommand(template) ?: return
+        // The shell needs a moment to start before input is accepted.
+        mActivity.lifecycleScope.launch {
+            kotlinx.coroutines.delay(TEMPLATE_START_DELAY_MS)
+            terminalSession.write(command + "\r")
+        }
+    }
+
+    /** Lists templates with the ability to delete user-defined ones. */
+    private fun showManageTemplatesDialog(store: SessionTemplateStore) {
+        val templates = store.load()
+        val labels = templates.map { template ->
+            if (template.isBuiltin) {
+                mActivity.getString(R.string.template_builtin_label, template.name)
+            } else {
+                template.name
+            }
+        }.toTypedArray()
+
+        AlertDialog.Builder(mActivity)
+            .setTitle(R.string.action_manage_templates)
+            .setItems(labels) { _, which ->
+                val template = templates[which]
+                if (template.isBuiltin) {
+                    mActivity.showToast(mActivity.getString(R.string.template_builtin_undeletable), false)
+                } else {
+                    confirmDeleteTemplate(store, template)
+                }
+            }
+            .setPositiveButton(android.R.string.ok, null)
+            .show()
+    }
+
+    private fun confirmDeleteTemplate(store: SessionTemplateStore, template: SessionTemplates.Template) {
+        AlertDialog.Builder(mActivity)
+            .setTitle(R.string.template_delete_title)
+            .setMessage(template.name)
+            .setPositiveButton(R.string.template_delete_confirm) { _, _ ->
+                store.delete(template.id)
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    /** Template storage lives in app-private files, not in the user's home directory. */
+    private fun mActivityTemplateFile(): java.io.File =
+        java.io.File(mActivity.filesDir, "session-templates.json")
+
+    /**
+     * Opens the recorded command history.
+     *
+     * Selecting an entry types it into the current session rather than running it, because a recorded
+     * command may well be something the user wants to adjust first.
+     */
+    private fun showCommandHistoryDialog() {
+        val recorder = mActivity.commandHistoryRecorder
+        if (recorder == null) {
+            mActivity.showToast(mActivity.getString(R.string.history_unavailable), true)
+            return
+        }
+
+        val entries = recorder.readAll().reversed().take(HISTORY_DIALOG_LIMIT)
+        if (entries.isEmpty()) {
+            mActivity.showToast(mActivity.getString(R.string.history_empty), true)
+            return
+        }
+
+        val labels = entries.map { entry ->
+            buildString {
+                entry.exitStatus?.let { append(if (it == 0) "✓ " else "✗$it ") }
+                append(entry.command)
+                append("   ")
+                append(formatDuration(entry.durationMs))
+            }
+        }.toTypedArray()
+
+        AlertDialog.Builder(mActivity)
+            .setTitle(R.string.action_command_history)
+            .setItems(labels) { _, which ->
+                val session = mActivity.currentSession ?: return@setItems
+                session.write(entries[which].command + "\r")
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    /** Formats a duration compactly for the history list. */
+    private fun formatDuration(millis: Long): String = when {
+        millis < 1_000 -> "${millis}ms"
+        millis < 60_000 -> "${millis / 1_000}s"
+        else -> "${millis / 60_000}m"
+    }
+
+    /**
      * Show the "More" popup menu anchored below the "More" button.
      *
      * Provides three actions:
@@ -569,12 +853,27 @@ class TermuxTerminalSessionActivityClient(private val mActivity: TermuxActivity)
         )
 
         PopupMenu(themedContext, anchor).apply {
+            menu.add(Menu.NONE, MENU_SEARCH_SCROLLBACK, Menu.NONE, R.string.action_search)
+            menu.add(Menu.NONE, MENU_NEW_FROM_TEMPLATE, Menu.NONE, R.string.action_new_from_template)
+            menu.add(Menu.NONE, MENU_COMMAND_HISTORY, Menu.NONE, R.string.action_command_history)
             menu.add(Menu.NONE, MENU_NEW_SYSTEM_SESSION, Menu.NONE, R.string.action_new_system_session)
             menu.add(Menu.NONE, MENU_FINISH_OTHER_SESSIONS, Menu.NONE, R.string.action_finish_other_sessions)
             menu.add(Menu.NONE, MENU_FINISH_ALL_SESSIONS, Menu.NONE, R.string.action_finish_all_sessions)
 
             setOnMenuItemClickListener { item ->
                 when (item.itemId) {
+                    MENU_SEARCH_SCROLLBACK -> {
+                        showScrollbackSearchDialog()
+                        true
+                    }
+                    MENU_NEW_FROM_TEMPLATE -> {
+                        showSessionTemplateDialog()
+                        true
+                    }
+                    MENU_COMMAND_HISTORY -> {
+                        showCommandHistoryDialog()
+                        true
+                    }
                     MENU_NEW_SYSTEM_SESSION -> {
                         addNewSession(false, null)
                         true
@@ -608,5 +907,14 @@ class TermuxTerminalSessionActivityClient(private val mActivity: TermuxActivity)
         private const val MENU_NEW_SYSTEM_SESSION = 1
         private const val MENU_FINISH_OTHER_SESSIONS = 2
         private const val MENU_FINISH_ALL_SESSIONS = 3
+        private const val MENU_SEARCH_SCROLLBACK = 4
+        private const val MENU_NEW_FROM_TEMPLATE = 5
+        private const val MENU_COMMAND_HISTORY = 6
+
+        /** How long to wait for a new shell before typing a template's initial command. */
+        private const val TEMPLATE_START_DELAY_MS: Long = 350L
+
+        /** Maximum entries shown in the history dialog. */
+        private const val HISTORY_DIALOG_LIMIT: Int = 100
     }
 }
