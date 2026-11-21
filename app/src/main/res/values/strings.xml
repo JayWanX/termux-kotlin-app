@@ -55,6 +55,11 @@
     <string name="action_toggle_soft_keyboard">Keyboard</string>
 
     <string name="msg_enabling_terminal_toolbar">Enabling Terminal Toolbar</string>
+    <string name="terminal_toolbar_text_input_hint">Send text to terminal…</string>
+    <string name="terminal_toolbar_text_input_send">Send</string>
+    <string name="terminal_toolbar_text_input_handle">Swipe to switch toolbar</string>
+    <string name="msg_terminal_toolbar_text_input_sent">Text sent</string>
+    <string name="msg_terminal_toolbar_text_input_empty">Nothing to send</string>
     <string name="msg_disabling_terminal_toolbar">Disabling Terminal Toolbar</string>
 
 

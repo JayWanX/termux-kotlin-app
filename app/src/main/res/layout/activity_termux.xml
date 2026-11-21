@@ -28,7 +28,7 @@
             android:scrollbars="vertical"
             tools:ignore="UnusedAttribute" />
 
-        <androidx.viewpager.widget.ViewPager
+        <com.termux.app.terminal.io.SwipeableToolbarViewPager
             android:id="@+id/terminal_toolbar_view_pager"
             android:visibility="gone"
             android:layout_width="match_parent"
